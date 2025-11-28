@@ -1,3 +1,21 @@
+commit fdcc3f32eddb552a5e8c2bbfc881b1c5ba84afc2
+Author: Marcus Oskarsson <oscarsso@esrf.fr>
+Date:   Mon Nov 10 09:28:28 2025 +0000
+
+    [skip ci] Bumped minor version
+
+diff --git a/pyproject.toml b/pyproject.toml
+index a033113f..66faa90a 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -1,6 +1,6 @@
+ [project]
+ name = "mxcubecore"
+-version = "1.418.0"
++version = "1.419.0"
+ license = "LGPL-3.0-or-later"
+ description = "Core libraries for the MXCuBE application"
+ authors = [
 #! /usr/bin/env python
 # encoding: utf-8
 #
@@ -150,11 +168,15 @@ class Beamline(ConfiguredObject):
             logging.getLogger("HWR").warning(
                 "Unrecognised parameter limits for: %s" % unrecognised
             )
+        import pdb
+
+        pdb.set_trace()
+
 
     def _hwr_init_done(self):
         """
         Method called after the initialization of HardwareRepository is done
-        (when all HardwareObjects have been created and initialized)
+        (when all HardwreObjects have been created and initialized)
         """
         self._hardware_object_id_dict = self._get_id_dict()
 
