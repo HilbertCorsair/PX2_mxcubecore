@@ -1,20 +1,22 @@
-import binascii
-import logging
-import os
-import pprint
-import socket
-import time
-
-import gevent
-import requests
-
-from mxcubecore import HardwareRepository as HWR
 from mxcubecore.BaseHardwareObjects import HardwareObject
 
+import os
+import time
+import gevent
+import pprint
+import logging
+import requests
+import binascii
+
 # import threading
-from mxcubecore.HardwareObjects.SecureXMLRpcRequestHandler import (
-    SecureXMLRpcRequestHandler,
-)
+from mxcubecore.HardwareObjects.SecureXMLRpcRequestHandler import SecureXMLRpcRequestHandler
+from mxcubecore import HardwareRepository as HWR
+
+try:
+    from httplib import HTTPConnection
+except Exception:
+    # Python3
+    from http.client import HTTPConnection
 
 
 class State(object):
@@ -97,12 +99,14 @@ class EdnaWorkflow(HardwareObject):
         return self.command_failed
 
     def set_command_failed(self, *args):
-        self.log.error("Workflow '%s' Tango command failed!", args[1])
+        logging.getLogger("HWR").error("Workflow '%s' Tango command failed!" % args[1])
         self.command_failed = True
 
     def state_changed(self, new_value):
         new_value = str(new_value)
-        self.log.debug(f"{self.name}: state changed to {new_value}")
+        logging.getLogger("HWR").debug(
+            "%s: state changed to %r", str(self.name()), new_value
+        )
         self.emit("stateChanged", (new_value,))
 
     def workflow_end(self):
@@ -118,7 +122,7 @@ class EdnaWorkflow(HardwareObject):
         # If necessary unblock dialog
         if not self.gevent_event.is_set():
             self.gevent_event.set()
-        self.params_dict = {}
+        self.params_dict = dict()
         if "reviewData" in dict_dialog and "inputMap" in dict_dialog:
             review_data = dict_dialog["reviewData"]
             for dict_entry in dict_dialog["inputMap"]:
@@ -143,39 +147,44 @@ class EdnaWorkflow(HardwareObject):
         self.gevent_event.set()
 
     def get_available_workflows(self):
-        workflow_list = []
-
-        for _wf in self.get_property("workflow"):
-            wf = dict(_wf)
-            workflow_list.append(wf)
-            wf["requires"] = [r.strip() for r in wf.get("requires", "").split(",")]
-            wf["doc"] = ""
-
+        workflow_list = list()
+        no_wf = len(self["workflow"])
+        for wf_i in range(no_wf):
+            wf = self["workflow"][wf_i]
+            dict_workflow = dict()
+            dict_workflow["name"] = str(wf.title)
+            dict_workflow["path"] = str(wf.path)
+            try:
+                req = [r.strip() for r in wf.get_property("requires").split(",")]
+                dict_workflow["requires"] = req
+            except (AttributeError, TypeError):
+                dict_workflow["requires"] = []
+            dict_workflow["doc"] = ""
+            workflow_list.append(dict_workflow)
         return workflow_list
 
     def abort(self):
         self.generateNewToken()
-        self.log.info("Aborting current workflow")
+        logging.getLogger("HWR").info("Aborting current workflow")
         # If necessary unblock dialog
         if not self.gevent_event.is_set():
             self.gevent_event.set()
         self.command_failed = False
         if self.bes_workflow_id is not None:
-            abort_URL = (
-                f"http://{self.bes_host}:{self.bes_port}/ABORT/{self.bes_workflow_id}"
-            )
-            self.log.info("BES abort web service URL: %r", abort_URL)
+            abort_URL = os.path.join("http://{0}:{1}".format(self.bes_host, 
+                                                             self.bes_port),
+                                     "ABORT", 
+                                     self.bes_workflow_id)
+            logging.getLogger("HWR").info("BES abort web service URL: %r" % abort_URL)
             response = requests.get(abort_URL)
             if response.status_code == 200:
-                workflow_status = response.text
-                self.log.info(
-                    "BES workflow id %s: %s", self.bes_workflow_id, workflow_status
-                )
+                workflow_status=response.text
+                logging.getLogger("HWR").info("BES workflow id {0}: {1}".format(self.bes_workflow_id, workflow_status))
         self.state.value = "ON"
 
     def generateNewToken(self):
         # See: https://wyattbaldwin.com/2014/01/09/generating-random-tokens-in-python/
-        self.token = binascii.hexlify(os.urandom(5)).decode("utf-8")
+        self.token = binascii.hexlify(os.urandom(5)).decode('utf-8')
         SecureXMLRpcRequestHandler.setReferenceToken(self.token)
 
     def getToken(self):
@@ -214,55 +223,32 @@ class EdnaWorkflow(HardwareObject):
         time0 = time.time()
         self.startBESWorkflow()
         time1 = time.time()
-        logging.info("Time to start workflow: %f sec", time1 - time0)
+        logging.info("Time to start workflow: {0}".format(time1 - time0))
 
     def startBESWorkflow(self):
-        logging.info("Starting workflow %s", self.workflow_name)
-
-        xml_rpc_server = HWR.beamline.xml_rpc_server
-        if xml_rpc_server is None:
-            self.log.warning("No XMLRPCServer configured")
-            return
-
+        logging.info("Starting workflow {0}".format(self.workflow_name))
         logging.info(
-            "Starting a workflow on http://%s:%d/BES", self.bes_host, self.bes_port
+            "Starting a workflow on http://%s:%d/BES" % (self.bes_host, self.bes_port)
         )
-
+        start_URL = os.path.join(
+            "/BES", "bridge", "rest", "processes", self.workflow_name, "RUN"
+        )
         self.dict_parameters["initiator"] = HWR.beamline.session.endstation_name
         self.dict_parameters["sessionId"] = HWR.beamline.session.session_id
         self.dict_parameters["externalRef"] = HWR.beamline.session.get_proposal()
-        try:
-            self.dict_parameters["sample"] = HWR.beamline.lims.find_sample_by_sample_id(
-                self.dict_parameters.get("sample_lims_id")
-            )
-
-        except (RuntimeError, AttributeError):
-            logging.warning("Failed to fetch sample information for")
-
-        try:
-            self.dict_parameters["investigationId"] = (
-                HWR.beamline.lims.session_manager.active_session.session_id
-            )
-        except (RuntimeError, AttributeError):
-            logging.warning("Failed to fetch investigationId from HWR.beamline.lims")
-
-        self.dict_parameters["token"] = (
-            self.token
-        )  # Deprecated in favor of mxcubeParameters
-        self.dict_parameters["mxcubeParameters"] = {
-            "host": socket.getfqdn(),
-            "port": xml_rpc_server.port,
-            "token": self.token,
-        }
-
-        start_URL = f"http://{self.bes_host}:{self.bes_port}/RUN/{self.workflow_name}"
-        self.log.info("BES start URL: %r", start_URL)
+        self.dict_parameters["token"] = self.token
+        start_URL = os.path.join("http://{0}:{1}".format(self.bes_host, 
+                                                         self.bes_port),
+                                 "RUN", 
+                                 self.workflow_name)
+        logging.getLogger("HWR").info("BES start URL: %r" % start_URL)
         response = requests.post(start_URL, json=self.dict_parameters)
         if response.status_code == 200:
             self.state.value = "RUNNING"
             request_id = response.text
-            self.log.info("Workflow started, BES request id: %r", request_id)
+            logging.getLogger("HWR").info("Workflow started, request id: %r" % request_id)
             self.bes_workflow_id = request_id
         else:
-            self.log.error("Workflow didn't start!")
+            logging.getLogger("HWR").error("Workflow didn't start!")
+            request_id = None
             self.state.value = "ON"

@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -17,20 +17,23 @@
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with MXCuBE. If not, see <http://www.gnu.org/licenses/>.
 
-import logging
 import os
-import subprocess
 import time
+import logging
+import subprocess
 
 import gevent
 import numpy as np
-from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
+from matplotlib.backends.backend_agg import FigureCanvasAgg
 
-from mxcubecore import HardwareRepository as HWR
 from mxcubecore import TaskUtils
+from mxcubecore.HardwareObjects.abstract.AbstractEnergyScan import (
+    AbstractEnergyScan,
+)
 from mxcubecore.BaseHardwareObjects import HardwareObject
-from mxcubecore.HardwareObjects.abstract.AbstractEnergyScan import AbstractEnergyScan
+from mxcubecore import HardwareRepository as HWR
+
 
 __credits__ = ["EMBL Hamburg"]
 __license__ = "LGPLv3+"
@@ -39,6 +42,7 @@ __category__ = "General"
 
 class EMBLEnergyScan(AbstractEnergyScan, HardwareObject):
     def __init__(self, name):
+
         AbstractEnergyScan.__init__(self)
         HardwareObject.__init__(self, name)
         self._tunable_bl = True
@@ -97,9 +101,9 @@ class EMBLEnergyScan(AbstractEnergyScan, HardwareObject):
                 logging.getLogger("GUI").info("Energy scan: Executing...")
 
                 if HWR.beamline.transmission is not None:
-                    self.scan_info["transmissionFactor"] = (
-                        HWR.beamline.transmission.get_value()
-                    )
+                    self.scan_info[
+                        "transmissionFactor"
+                    ] = HWR.beamline.transmission.get_value()
                 else:
                     self.scan_info["transmissionFactor"] = None
             elif status == "ready":
@@ -153,7 +157,7 @@ class EMBLEnergyScan(AbstractEnergyScan, HardwareObject):
     def is_connected(self):
         return True
 
-    def start_energy_scan(
+    def startEnergyScan(
         self,
         element,
         edge,
@@ -179,9 +183,9 @@ class EMBLEnergyScan(AbstractEnergyScan, HardwareObject):
         :type blsample_id: int
         :param exptime: exposure time in seconds
         :type exptime: float
-        :return: True if success, otherwise returns False
+        :return: True if success, otherwise returns Fals
         """
-        log = self.log
+        log = logging.getLogger("HWR")
 
         self.scan_info = {
             "sessionId": session_id,
@@ -304,7 +308,7 @@ class EMBLEnergyScan(AbstractEnergyScan, HardwareObject):
     def scanCommandFinished(self, *args):
         with TaskUtils.cleanup(self.ready_event.set):
             self.scan_info["endTime"] = time.strftime("%Y-%m-%d %H:%M:%S")
-            self.log.debug("Energy scan: finished")
+            logging.getLogger("HWR").debug("Energy scan: finished")
             self.scanning = False
             self.scan_info["startEnergy"] = self.scan_data[-1][0]
             self.scan_info["endEnergy"] = self.scan_data[-1][1]
@@ -313,7 +317,7 @@ class EMBLEnergyScan(AbstractEnergyScan, HardwareObject):
             if hasattr(HWR.beamline.energy, "set_break_bragg"):
                 HWR.beamline.energy.set_break_bragg()
 
-    def do_chooch(self, elt, edge, scan_directory, archive_directory, prefix):
+    def doChooch(self, elt, edge, scan_directory, archive_directory, prefix):
         archive_file_prefix = str(os.path.join(archive_directory, prefix))
 
         if os.path.exists(archive_file_prefix + ".raw"):
@@ -330,7 +334,9 @@ class EMBLEnergyScan(AbstractEnergyScan, HardwareObject):
             if not os.path.exists(archive_directory):
                 os.makedirs(archive_directory)
         except Exception:
-            self.log.exception("EMBLEnergyScan: could not create results directory.")
+            logging.getLogger("HWR").exception(
+                "EMBLEnergyScan: could not create results directory."
+            )
             self.store_energy_scan()
             self.emit("energyScanFailed", ())
             return
@@ -338,7 +344,9 @@ class EMBLEnergyScan(AbstractEnergyScan, HardwareObject):
         try:
             archive_file_raw = open(archive_file_raw_filename, "w")
         except Exception:
-            self.log.exception("EMBLEnergyScan: could not create results raw file")
+            logging.getLogger("HWR").exception(
+                "EMBLEnergyScan: could not create results raw file"
+            )
             self.store_energy_scan()
             self.emit("energyScanFailed", ())
             return
@@ -373,8 +381,6 @@ class EMBLEnergyScan(AbstractEnergyScan, HardwareObject):
             self.store_energy_scan()
 
             logging.getLogger("GUI").error("Energy scan: Chooch failed")
-
-            self.log.exception("")
             return None, None, None, None, None, None, None, [], [], [], None
 
         rm = (pk + 30) / 1000.0
@@ -405,7 +411,7 @@ class EMBLEnergyScan(AbstractEnergyScan, HardwareObject):
         for i in range(len(chooch_graph_x)):
             chooch_graph_x[i] = chooch_graph_x[i] / 1000.0
 
-        # self.log.info("EMBLEnergyScan: Saving png" )
+        # logging.getLogger("HWR").info("EMBLEnergyScan: Saving png" )
         # prepare to save png files
         title = "%s  %s  %s\n%.4f  %.2f  %.2f\n%.4f  %.2f  %.2f" % (
             "energy",
@@ -455,13 +461,13 @@ class EMBLEnergyScan(AbstractEnergyScan, HardwareObject):
 
         self.scan_info["jpegChoochFileFullPath"] = str(archive_file_png_filename)
         try:
-            self.log.info(
+            logging.getLogger("HWR").info(
                 "Saving energy scan to archive directory for ISPyB : %s",
                 archive_file_png_filename,
             )
             canvas.print_figure(archive_file_png_filename, dpi=80)
         except Exception:
-            self.log.exception("could not save figure")
+            logging.getLogger("HWR").exception("could not save figure")
 
         self.store_energy_scan()
 
@@ -512,12 +518,12 @@ class EMBLEnergyScan(AbstractEnergyScan, HardwareObject):
                     }
                 )
         except IndexError:
-            self.log.exception("")
+            pass
         return elements
 
     def get_scan_data(self):
         """Returns energy scan data.
-        List contains tuples of (energy, counts)
+           List contains tuples of (energy, counts)
         """
         return self.scan_data
 

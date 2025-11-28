@@ -1,11 +1,9 @@
+from mxcubecore.BaseHardwareObjects import Device
 import math
-
 import numpy as np
 
-from mxcubecore.BaseHardwareObjects import HardwareObject
 
-
-class MiniKappaCorrection(HardwareObject):
+class MiniKappaCorrection(Device):
     """
     this will work on numbers only!
     """
@@ -20,6 +18,7 @@ class MiniKappaCorrection(HardwareObject):
         self.cos2a = pow(np.dot(self.kappa["direction"], self.align_direction), 2)
 
     def shift(self, kappa1, phi1, x, kappa2, phi2):
+
         tk = self.kappa["position"]
         tp = self.phi["position"]
 
@@ -50,8 +49,8 @@ class MiniKappaCorrection(HardwareObject):
 
     def alignVector(self, t1, t2, kappa, phi):
         x = np.array(t1) - np.array(t2)  # rotating vector
-        Rk = self.rotation_matrix(self.kappa, -kappa)
-        Rp = self.rotation_matrix(self.phi, -phi)
+        Rk = self.rotation_matrix(self.kappa, -kappa)  #
+        Rp = self.rotation_matrix(self.phi, -phi)  #
         x = np.dot(Rp, np.dot(Rk, x)) / np.linalg.norm(
             x
         )  # rotate backwards and normalize

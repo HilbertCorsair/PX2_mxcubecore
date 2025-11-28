@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -18,18 +18,18 @@
 #  along with MXCuBE. If not, see <http://www.gnu.org/licenses/>.
 
 import logging
-
 import gevent
-
+from mxcubecore.BaseHardwareObjects import Device
 from mxcubecore import HardwareRepository as HWR
-from mxcubecore.BaseHardwareObjects import HardwareObject
+
 
 __credits__ = ["EMBL Hamburg"]
 __license__ = "LGPLv3+"
 __category__ = "General"
 
 
-class EMBLDoorInterlock(HardwareObject):
+class EMBLDoorInterlock(Device):
+
     DoorInterlockState = {
         3: "unlocked",
         1: "closed",
@@ -39,12 +39,16 @@ class EMBLDoorInterlock(HardwareObject):
     }
 
     def __init__(self, name):
-        super().__init__(name)
+
+        Device.__init__(self, name)
 
         self.use_door_interlock = None
         self.door_interlock_state = None
         self.door_interlock_final_state = None
         self.door_interlock_breakabled = None
+
+        self.before_unlock_commands_present = None
+        self.before_unlock_commands = None
 
         self.chan_ics_error = None
         self.chan_state_locked = None
@@ -55,9 +59,22 @@ class EMBLDoorInterlock(HardwareObject):
         self.ics_enabled = True
 
     def init(self):
+
         self.door_interlock_state = "unknown"
 
-        self.use_door_interlock = self.get_property("useDoorInterlock", True)
+        self.before_unlock_commands_present = self.get_property(
+            "before_unlock_commands_present"
+        )
+        try:
+            self.before_unlock_commands = eval(
+                self.get_property("beforeUnlockCommands")
+            )
+        except Exception:
+            pass
+
+        self.use_door_interlock = self.get_property("useDoorInterlock")
+        if self.use_door_interlock is None:
+            self.use_door_interlock = True
 
         self.chan_state_locked = self.get_channel_object("chanStateLocked")
         self.chan_state_locked.connect_signal("update", self.state_locked_changed)
@@ -144,8 +161,8 @@ class EMBLDoorInterlock(HardwareObject):
 
     def unlock_door_interlock(self):
         """Break Interlock (only if it is allowed by doorInterlockCanUnlock)
-        It doesn't matter what we are sending in the command
-        as long as it is a one char
+           It doesn't matter what we are sending in the command
+           as long as it is a one char
         """
         if HWR.beamline.diffractometer is not None:
             detector_distance = HWR.beamline.detector.distance
@@ -188,7 +205,7 @@ class EMBLDoorInterlock(HardwareObject):
                 )
                 logging.getLogger("GUI").error(msg)
         else:
-            self.log.info("Door is Interlocked")
+            logging.getLogger("HWR").info("Door is Interlocked")
 
     def re_emit_values(self):
         """Updates state"""

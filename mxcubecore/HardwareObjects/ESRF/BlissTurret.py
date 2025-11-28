@@ -1,11 +1,10 @@
-from bliss.config import static
-
 from mxcubecore.BaseHardwareObjects import HardwareObject
+from bliss.config import static
 
 
 class BlissTurret(HardwareObject):
     def __init__(self, name):
-        super().__init__(name)
+        Device.__init__(self, name)
 
     def init(self):
         self.username = self.turret_name

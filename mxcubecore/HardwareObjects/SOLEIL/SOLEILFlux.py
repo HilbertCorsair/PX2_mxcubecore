@@ -1,12 +1,10 @@
-import PyTango
-
 from mxcubecore import HardwareRepository as HWR
-from mxcubecore.BaseHardwareObjects import HardwareObject
+from mxcubecore.BaseHardwareObjects import Device
 
 
-class SOLEILFlux(HardwareObject):
+class SOLEILFlux(Device):
     def __init__(self, name):
-        super().__init__(name)
+        Device.__init__(self, name)
 
     def init(self):
         self.flux_channel = self.get_channel_object("flux")

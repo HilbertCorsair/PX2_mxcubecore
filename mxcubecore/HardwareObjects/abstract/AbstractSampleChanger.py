@@ -1,4 +1,4 @@
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -102,7 +102,6 @@ SampleChanger.INFO_CHANGED_EVENT
 SampleChanger.LOADED_SAMPLE_CHANGED_EVENT
 SampleChanger.SELECTION_CHANGED_EVENT
 SampleChanger.TASK_FINISHED_EVENT
-SampleChanger.PROGRESS_MESSAGE
 
 Tools for SC Classes
 ----------------------
@@ -127,15 +126,18 @@ How to implement derived SC Classes
 
 import abc
 import logging
+import time
+import types
+import gevent
 
-from gevent import (
-    Timeout,
-    sleep,
+
+from mxcubecore.TaskUtils import task
+from mxcubecore.BaseHardwareObjects import Equipment
+from mxcubecore.HardwareObjects.abstract.sample_changer.Container import (
+    Container,
+    Basket,
+    Pin
 )
-
-from mxcubecore.BaseHardwareObjects import HardwareObject
-from mxcubecore.HardwareObjects.abstract.sample_changer.Container import Container
-from mxcubecore.TaskUtils import task as dtask
 
 
 class SampleChangerState:
@@ -182,7 +184,6 @@ class SampleChangerState:
 
     @staticmethod
     def tostring(state):
-        """Convert state to string"""
         return SampleChangerState.STATE_DESC.get(state, "Unknown")
 
 
@@ -197,7 +198,7 @@ class SampleChangerMode:
     Disabled = 11
 
 
-class SampleChanger(Container, HardwareObject):
+class SampleChanger(Container, Equipment):
     """
     Abstract base class for sample changers
     """
@@ -212,14 +213,14 @@ class SampleChanger(Container, HardwareObject):
     SELECTION_CHANGED_EVENT = "selectionChanged"
     TASK_FINISHED_EVENT = "taskFinished"
     CONTENTS_UPDATED_EVENT = "contentsUpdated"
-    PROGRESS_MESSAGE = "progress_message"
 
-    def __init__(self, type_, scannable, name):
-        super().__init__(type_, None, type_, scannable)
-        HardwareObject.__init__(self, name)
+    def __init__(self, type, scannable, *args, **kwargs):
+        super(SampleChanger, self).__init__(type, None, type, scannable)
+        if len(args) == 0:
+            args = (type,)
+        Equipment.__init__(self, *args, **kwargs)
         self.state = -1
         self.status = ""
-        self._progress_message = ""
         self._set_state(SampleChangerState.Unknown)
         self.task = None
         self.task_proc = None
@@ -228,16 +229,19 @@ class SampleChanger(Container, HardwareObject):
         self._token = None
         self._timer_update_inverval = 5  # interval in periods of 100 ms
         self._timer_update_counter = 0
-        self.use_update_timer = None
 
     def init(self):
         """
         HardwareObject init method
         """
-        use_update_timer = self.get_property("useUpdateTimer", True)
+        use_update_timer = self.get_property("useUpdateTimer")
 
-        msg = f"SampleChanger: Using update timer is {use_update_timer}"
-        self.log.info(msg)
+        if use_update_timer is None:
+            use_update_timer = True
+
+        logging.getLogger("HWR").info(
+            "SampleChanger: Using update timer is %s " % use_update_timer
+        )
 
         if use_update_timer:
             task1s = self.__timer_1s_task(wait=False)
@@ -255,20 +259,20 @@ class SampleChanger(Container, HardwareObject):
     def _on_timer_update_exit(self, task):
         logging.warning("Exiting Sample Changer update timer task")
 
-    @dtask
+    @task
     def __timer_1s_task(self, *args):
         while True:
-            sleep(1.0)
+            gevent.sleep(1.0)
             try:
                 if self.is_enabled():
                     self._on_timer_1s()
             except Exception:
                 pass
 
-    @dtask
+    @task
     def __update_timer_task(self, *args):
         while True:
-            sleep(1)
+            gevent.sleep(0.1)
             try:
                 if self.is_enabled():
                     self._timer_update_counter += 1
@@ -292,8 +296,7 @@ class SampleChanger(Container, HardwareObject):
     # #######################    HardwareObject    #######################
 
     def connect_notify(self, signal):
-        msg = f"connect_notify {signal}"
-        logging.getLogger().info(msg)
+        logging.getLogger().info("connect_notify " + str(signal))
 
     # ########################    PUBLIC    #########################
 
@@ -312,116 +315,6 @@ class SampleChanger(Container, HardwareObject):
         """
         return self.status
 
-    def get_contents_as_dict(self) -> dict:
-        """
-        Build and return the hierarchical structure of the sample changer contents.
-
-        Returns:
-            dict: A nested dictionary describing the sample changer contents.
-                {
-                    "name": <str>,  # root sample changer address
-                    "room_temperature_mode": <bool> (optional),
-                    "children": [
-                        {
-                            "name": <str>,       # element address
-                            "status": <str>,     # "Loaded", "Used", "Present", or ""
-                            "id": <str>,         # element ID
-                            "selected": <bool>,  # whether element is selected
-                            "children": [ ... ]  # nested elements, same structure
-                        },
-                        ...
-                    ]
-                }
-        """
-        contents = {"name": self.get_address()}
-
-        if hasattr(self, "get_room_temperature_mode"):
-            contents["room_temperature_mode"] = self.get_room_temperature_mode()
-
-        for element in self.get_components():
-            if element.is_present():
-                self._add_element(contents, element)
-
-        return contents
-
-    def _get_status(self, element) -> str:
-        """
-        Determine the status string for a sample changer element.
-
-        Args:
-            element: The element object to check.
-
-        Returns:
-            str: One of:
-                - "Loaded":  element is a leaf and currently loaded
-                - "Used":    element is a leaf and has been loaded before
-                - "Present": element is present in the changer
-                - "":        element is not present
-        """
-        if element.is_leaf():
-            if element.is_loaded():
-                return "Loaded"
-            if element.has_been_loaded():
-                return "Used"
-            return ""
-        return "Present" if element.is_present() else ""
-
-    def _get_id(self, element) -> str:
-        """
-        Get the unique identifier (ID or token) for a sample changer element.
-
-        Args:
-            element: The element to get the ID for.
-
-        Returns:
-            str: The token (if root sample changer and available),
-                 the element ID (if available), or an empty string.
-        """
-        if element == self:
-            token = element.get_token()
-            return token if token else ""
-
-        return element.get_id() or ""
-
-    def _add_element(self, parent, element) -> dict:
-        """
-        Recursively add an element and its children into the contents dictionary.
-
-        Args:
-            parent (dict): The parent dictionary to append the element to.
-            element: The element object to add.
-        """
-        new_element = {
-            "name": element.get_address(),
-            "status": self._get_status(element),
-            "id": self._get_id(element),
-            "selected": element.is_selected(),
-        }
-
-        parent.setdefault("children", []).append(new_element)
-
-        if not element.is_leaf():
-            for child in element.get_components():
-                self._add_element(new_element, child)
-
-    @property
-    def progress_message(self) -> str:
-        """
-        Returns:
-            Current progress message
-        """
-        self._progress_message
-
-    def set_progress_message(self, message: str) -> None:
-        """
-        Set progress message describing the current sample changer activity.
-
-        Args:
-            message: string describing current sample changer activity.
-        """
-        self._progress_message = message
-        self._trigger_progress_message(message)
-
     def get_task_error(self):
         """
         Returns:
@@ -432,37 +325,43 @@ class SampleChanger(Container, HardwareObject):
     def is_ready(self):
         """
         Returns:
-            (bool): True if the state corresponds to READY.
+            (str): Description of the error of last executed task (or None if success).
         """
-        return self.state in (
-            SampleChangerState.Ready,
-            SampleChangerState.Loaded,
-            SampleChangerState.Charging,
-            SampleChangerState.StandBy,
+        return (
+            self.state == SampleChangerState.Ready
+            or self.state == SampleChangerState.Loaded
+            or self.state == SampleChangerState.Charging
+            or self.state == SampleChangerState.StandBy
         )
 
-    def wait_ready(self, timeout=None):
-        """Wait for current sample changer operation to finish.
-        Blocks for timeout seconds or forever if timeout is None
-        Args:
-            timeout (int): timeout [s].
-        Raises:
-            (Exception): If operation lasts longer than the timeout.
+    def wait_ready(self, timeout=-1):
         """
-        with Timeout(timeout, RuntimeError("Timeout waiting ready")):
-            while not self.is_ready():
-                sleep(0.5)
+        Wait for current sample changer operation to finish. Blocks for timeout seconds
+        or forever if timout = -1.
+
+        Args:
+            timeout (int): timeout in seconds
+
+        Raises:
+            (Exception): If operation lasts longer than timeout seconds
+        """
+        start = time.clock()
+        while not self.is_ready():
+            if timeout > 0:
+                if (time.clock() - start) > timeout:
+                    raise Exception("Timeout waiting ready")
+            gevent.sleep(0.01)
 
     def is_normal_state(self):
         """
         Returns:
-            (bool): True if state is not in the 'NOT USABLE' states list.
+            (str): Description of the error of last executed task (or None if success).
         """
-        return self.state not in (
-            SampleChangerState.Disabled,
-            SampleChangerState.Alarm,
-            SampleChangerState.Fault,
-            SampleChangerState.Unknown,
+        return (
+            self.state != SampleChangerState.Disabled
+            and self.state != SampleChangerState.Alarm
+            and self.state != SampleChangerState.Fault
+            and self.state != SampleChangerState.Unknown
         )
 
     def is_enabled(self):
@@ -475,7 +374,7 @@ class SampleChanger(Container, HardwareObject):
     def assert_enabled(self):
         """
         Raises:
-            (Exception): If sample changer is disabled.
+            (Exception): If sample changer is not enabled
         """
         if not self.is_enabled():
             raise Exception("Sample Changer is disabled")
@@ -491,7 +390,7 @@ class SampleChanger(Container, HardwareObject):
     def assert_can_execute_task(self):
         """
         Raises:
-            (Exception): If sample changer cannot execute a task
+            (Exeption): If sample changer cannot execute a task
         """
         if not self.is_ready():
             raise Exception(
@@ -516,22 +415,25 @@ class SampleChanger(Container, HardwareObject):
         """
         return self.task is not None
 
-    def wait_task_finished(self, timeout=None):
+    def wait_task_finished(self, timeout=-1):
         """
         Wait for currently running task to finish.
         """
-        with Timeout(timeout, RuntimeError("Timeout waiting end of task")):
-            while not self.is_task_finished():
-                sleep(0.1)
+        start = time.clock()
+        while not self.is_task_finished():
+            if timeout > 0:
+                if (time.clock() - start) > timeout:
+                    raise Exception("Timeout waiting end of task")
+            gevent.sleep(0.01)
 
     def get_loaded_sample(self):
         """
         Returns:
             (Sample) Currently loaded sample
         """
-        for smp in self.get_sample_list():
-            if smp.is_loaded():
-                return smp
+        for s in self.get_sample_list():
+            if s.is_loaded():
+                return s
         return None
 
     def has_loaded_sample(self):
@@ -542,12 +444,6 @@ class SampleChanger(Container, HardwareObject):
         return self.get_loaded_sample() is not None
 
     def is_mounted_sample(self, sample_location):
-        """Check if the sample is mounted.
-        Args:
-            sample_location: Sample location to check.
-        Returns:
-            (bool): True if mounted.
-        """
         try:
             return self.get_loaded_sample().get_coords() == sample_location
         except AttributeError:
@@ -589,31 +485,28 @@ class SampleChanger(Container, HardwareObject):
         self._reset_dirty()
 
     def is_transient(self):
-        """???"""
         return self._transient
 
     def _set_transient(self, value):
-        """???"""
         self._transient = value
 
     def get_token(self):
-        """???"""
         return self._token
 
     def set_token(self, token):
-        """???"""
         self._token = token
 
     def get_sample_properties(self):
         """
-        Returns:
-            (tuple): With sample properties defined in Sample
+            Returns:
+                (tuple): With sample properties defined in Sample
         """
         return ()
 
     # ########################    TASKS    #########################
     def change_mode(self, mode, wait=True):
-        """Change the mode (SC specific, imply change of the State)
+        """
+        Change the mode (SC specific, imply change of the State)
         Args:
             mode (int):
                 Modes:
@@ -621,15 +514,14 @@ class SampleChanger(Container, HardwareObject):
                 Normal    = 1
                 Charging  = 2
                 Disabled  = 3
-            wait (boolean): True to block until mode changed is completed,
-                            False otherwise
+            wait (boolean): True to block until mode changed is completed False otherwise
         Rerturns:
-            (Object): Value returned by _execute_task either a Task
-                      or result of the operation.
+            (Object): Value returned by _execute_task either a Task or result of the
+                      operation
         """
         if mode == SampleChangerMode.Unknown:
             return
-        if mode == self.get_state():
+        elif mode == self.get_state():
             return
         if self.get_state() == SampleChangerState.Disabled:
             self._set_state(SampleChangerState.Unknown)
@@ -640,32 +532,36 @@ class SampleChanger(Container, HardwareObject):
             SampleChangerState.ChangingMode, wait, self._do_change_mode, mode
         )
 
-    @dtask
+    @task
     def scan(self, component=None, recursive=False):
-        """Scan component or list of components for presence.
-        Args:
-            component (Component): Root component to start scan from. Sample
-                                   changer root is used if None is passed.
-            (recursive) (boolean): Recurse down the component structure if True,
-                                   scan only component otherwise.
-        Rerturns:
-            (Object): Value returned by _execute_task either a Task
-                      or result of the operation.
         """
-        obj_list = []
-        if isinstance(component, list):
-            for comp in component:
-                obj_list.append(self._scan_one(comp, recursive))
-            return obj_list
-        return self._scan_one(component, recursive)
+        Scan component or list of components for prescence.
+
+        Args:
+            component (Component): Root component to start scan from, sample changer root
+                                   is used if None is passed
+            (recursive) (boolean): Recurse down the component structure if True otherwise
+                                   scan only component.
+        Rerturns:
+            (Object): Value returned by _execute_task either a Task or result of the
+                      operation
+        """
+        if isinstance(component, types.ListType):
+            for c in component:
+                self._scan_one(c, recursive)
+        else:
+            return self._scan_one(component, recursive)
 
     def _scan_one(self, component, recursive):
-        """Scan component or list of components for samples.
+        """
+        Scan component or list of components for samples.
+
         Args:
-            component (Component): Root component to start scan from. Sample
-                                   changer root is used if None is passed
-            (recursive) (boolean): Recurse down the component structure if True.
-                                   scan only component  otherwise.
+            component (Component): Root component to start scan from, sample changer root
+                                   is used if None is passed
+            (recursive) (boolean): Recurse down the component structure if True otherwise
+                                   scan only component.
+
         Rerturns:
             (Object): Value returned by _execute_task either a Task or result of the
                       operation
@@ -739,9 +635,10 @@ class SampleChanger(Container, HardwareObject):
                     + " is already loaded"
                 )
             return self.chained_load(self.get_loaded_sample(), sample)
-        return self._execute_task(
-            SampleChangerState.Loading, wait, self._do_load, sample
-        )
+        else:
+            return self._execute_task(
+                SampleChangerState.Loading, wait, self._do_load, sample
+            )
 
     def unload(self, sample_slot=None, wait=True):
         """
@@ -786,10 +683,10 @@ class SampleChanger(Container, HardwareObject):
 
     def _resolve_component(self, component):
         if component is not None and isinstance(component, str):
-            comp = self.get_component_by_address(component)
-            if comp is None:
-                raise Exception(f"Invalid component: {component}")
-            return comp
+            c = self.get_component_by_address(component)
+            if c is None:
+                raise Exception("Invalid component: " + component)
+            return c
         return component
 
     # ########################    ABSTRACTS    #########################
@@ -833,8 +730,7 @@ class SampleChanger(Container, HardwareObject):
 
     def _execute_task(self, task, wait, method, *args):
         self.assert_can_execute_task()
-        msg = f"Start {SampleChangerState.tostring(task)}"
-        logging.debug(msg)
+        logging.debug("Start " + SampleChangerState.tostring(task))
         self.task = task
         self.task_error = None
         self._set_state(task)
@@ -844,19 +740,20 @@ class SampleChanger(Container, HardwareObject):
         ret.link(self._on_task_ended)
         if wait:
             return ret.get()
-        return ret
+        else:
+            return ret
 
-    @dtask
+    @task
     def _run(self, task, method, *args):
         """
         method(self,*arguments)
-        exception=None
+        exeption=None
         try:
             while !_is_task_finished(state):
               time.sleep(0.1)
-            exception=_getTaskException(state)
+            exeption=_getTaskException(state)
         finally:
-            _trigger_task_finished_event(state,exception)
+            _trigger_task_finished_event(state,exeption)
             self._set_state(SampleChangerState.Ready)
         """
         exception = None
@@ -878,19 +775,16 @@ class SampleChanger(Container, HardwareObject):
         return ret
 
     def _on_task_failed(self, task, exception):
-        """What to do when task failed"""
+        pass
 
     def _on_task_ended(self, task):
-        """What to do when task ended normally"""
         try:
-            msg = f"Task ended. Return value: {task.get()}"
-            logging.debug(msg)
-        except Exception as err:
-            msg = f"Error while executing sample changer task: {err}"
-            logging.error(msg)
+            e = task.get()
+            logging.debug("Task ended. Return value: " + str(e))
+        except Exception as errmsg:
+            logging.error("Error while executing sample changer task: %s", str(errmsg))
 
     def _set_state(self, state=None, status=None):
-        """Set the state"""
         if (state is not None) and (self.state != state):
             former = self.state
             self.state = state
@@ -903,8 +797,8 @@ class SampleChanger(Container, HardwareObject):
             self._trigger_status_changed_event()
 
     def _reset_loaded_sample(self):
-        for smp in self.get_sample_list():
-            smp._set_loaded(False)
+        for s in self.get_sample_list():
+            s._set_loaded(False)
         self._trigger_loaded_sample_changed_event(None)
 
     def _set_loaded_sample(self, sample):
@@ -928,9 +822,6 @@ class SampleChanger(Container, HardwareObject):
         if cur != component:
             Container._set_selected_component(self, component)
             self._trigger_selection_changed_event()
-
-    def trigger_progress_message(self, message: str):
-        self.emit(self.PROGRESS_MESSAGE, (message,))
 
     # ########################    PRIVATE    #########################
 

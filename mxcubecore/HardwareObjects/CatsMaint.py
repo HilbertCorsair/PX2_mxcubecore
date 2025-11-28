@@ -11,15 +11,15 @@ Derived from Michael Hellmig's implementation for the BESSY CATS sample changer
 Vicente Rey - add support for ISARA Model
 
 """
-
 import logging
-import time
+
+from mxcubecore.TaskUtils import task
+from mxcubecore.BaseHardwareObjects import Equipment
 
 import gevent
-from PyTango import DeviceProxy
+import time
 
-from mxcubecore.BaseHardwareObjects import HardwareObject
-from mxcubecore.TaskUtils import task
+from PyTango import DeviceProxy
 
 __author__ = "Jie Nan"
 __credits__ = ["The MxCuBE collaboration"]
@@ -47,7 +47,8 @@ TOOL_TO_STR = {
 }
 
 
-class CatsMaint(HardwareObject):
+class CatsMaint(Equipment):
+
     __TYPE__ = "CATS"
     NO_OF_LIDS = 3
 
@@ -57,7 +58,7 @@ class CatsMaint(HardwareObject):
     """
 
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+        Equipment.__init__(self, *args, **kwargs)
 
         self._state = None
         self._running = None
@@ -71,6 +72,7 @@ class CatsMaint(HardwareObject):
         self._charging = None
 
     def init(self):
+
         self.cats_device = DeviceProxy(self.tangoname)
 
         try:
@@ -195,6 +197,7 @@ class CatsMaint(HardwareObject):
             {"type": "tango", "name": "_chnCurrentTool", "tangoname": self.tangoname},
             "Tool",
         )
+        #
         self._cmdPowerOn = self.add_command(
             {"type": "tango", "name": "_cmdPowerOn", "tangoname": self.tangoname},
             "powerOn",
@@ -396,7 +399,7 @@ class CatsMaint(HardwareObject):
         :returns: None
         :rtype: None
         """
-        self.log.debug("CatsMaint. doing reset")
+        logging.getLogger("HWR").debug("CatsMaint. doing reset")
         return
         self._cmdReset()
 
@@ -516,7 +519,7 @@ class CatsMaint(HardwareObject):
         :returns: None
         :rtype: None
         """
-        self.log.debug("   running power state command ")
+        logging.getLogger("HWR").debug("   running power state command ")
         if state:
             self._cmdPowerOn()
         else:
@@ -670,21 +673,21 @@ class CatsMaint(HardwareObject):
 
     def get_global_state(self):
         """
-        Update clients with a global state that
-        contains different:
+           Update clients with a global state that
+           contains different:
 
-        - first param (state_dict):
-            collection of state bits
+           - first param (state_dict):
+               collection of state bits
 
-        - second param (cmd_state):
-            list of command identifiers and the
-            status of each of them True/False
-            representing whether the command is
-            currently available or not
+           - second param (cmd_state):
+               list of command identifiers and the
+               status of each of them True/False
+               representing whether the command is
+               currently available or not
 
-        - message
-            a message describing current state information
-            as a string
+           - message
+               a message describing current state information
+               as a string
         """
         _ready = str(self._state) in ("READY", "ON")
 
@@ -729,10 +732,10 @@ class CatsMaint(HardwareObject):
         return state_dict, cmd_state, message
 
     def get_cmd_info(self):
-        """return information about existing commands for this object
-        the information is organized as a list
-        with each element contains
-        [ cmd_name,  display_name, category ]
+        """ return information about existing commands for this object
+           the information is organized as a list
+           with each element contains
+           [ cmd_name,  display_name, category ]
         """
         """ [cmd_id, cmd_display_name, nb_args, cmd_category, description ] """
         cmd_list = [
@@ -790,6 +793,8 @@ class CatsMaint(HardwareObject):
         return ret
 
     def send_command(self, cmd_name, args=None):
+
+        #
         lid = 1
         toolcal = 0
         tool = self.get_current_tool()
@@ -824,8 +829,11 @@ class CatsMaint(HardwareObject):
                 ret = cmd()
             return ret
         except Exception as exc:
-            self.log.exception("")
-            raise
+            import traceback
+
+            traceback.print_exc()
+            msg = exc[0].desc
+            raise Exception(msg)
 
 
 def test_hwo(hwo):

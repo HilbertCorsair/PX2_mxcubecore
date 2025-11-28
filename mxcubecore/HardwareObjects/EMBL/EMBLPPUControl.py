@@ -1,18 +1,19 @@
 import logging
 
-from mxcubecore.BaseHardwareObjects import HardwareObject
+from mxcubecore.BaseHardwareObjects import Device
+
 
 __credits__ = ["EMBL Hamburg"]
 __category__ = "General"
 
 
-class EMBLPPUControl(HardwareObject):
+class EMBLPPUControl(Device):
     """
     Allows to restart processes on PPU
     """
 
     def __init__(self, name):
-        super().__init__(name)
+        Device.__init__(self, name)
 
         self.all_status = None
         self.status_result = None
@@ -83,9 +84,9 @@ class EMBLPPUControl(HardwareObject):
 
     def file_info_changed(self, values):
         """
-        Updated information about transferred frames
+        Updated information about transfered frames
         values is a list of 3 values, where the last one indicates the number
-        of dropped frames
+        of droped frames
         :param values:
         :return:
         """
@@ -132,7 +133,7 @@ class EMBLPPUControl(HardwareObject):
                         logging.getLogger("GUI").error(msg)
         else:
             msg = "PPUControl: %s" % self.all_status
-            self.log.debug(msg)
+            logging.getLogger("HWR").debug(msg)
 
         self.msg = (
             "Restart result:\n\n%s\n\n" % self.restart_result

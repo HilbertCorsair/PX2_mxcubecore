@@ -1,12 +1,11 @@
-import logging
+from scipy import optimize
+import numpy
+import gevent.event
 import math
+import time
+import logging
 import os
 import tempfile
-import time
-
-import gevent.event
-import numpy
-from scipy import optimize
 
 try:
     import lucid3 as lucid
@@ -26,9 +25,8 @@ def multiPointCentre(z, phis):
     def errfunc(p, x, y):
         return fitfunc(p, x) - y
 
-    # The function call returns tuples of varying length
-    result = optimize.leastsq(errfunc, [1.0, 0.0, 0.0], args=(phis, z))
-    return result[0]
+    p1, success = optimize.leastsq(errfunc, [1.0, 0.0, 0.0], args=(phis, z))
+    return p1
 
 
 USER_CLICKED_EVENT = None
@@ -37,19 +35,18 @@ SAVED_INITIAL_POSITIONS = {}
 READY_FOR_NEXT_POINT = gevent.event.Event()
 NUM_CENTRING_ROUNDS = 1
 
-
 class CentringMotor:
-    def __init__(self, motor, reference_position=None, direction=1, units="mm"):
+    def __init__(self, motor, reference_position=None, direction=1, units='mm'):
         self.motor = motor
         self.direction = direction
         self.reference_position = reference_position
         self.units = units.lower()
 
-        self._scale = 1.0  # mm or deg
+        self._scale = 1.0 # mm or deg
 
-        if units == "micron" or units == "microns":
+        if units == 'micron' or units == 'microns':
             self._scale = 1000.0
-
+        
     def mm_to_units(self, mm_dist):
         return mm_dist * self._scale
 
@@ -65,34 +62,27 @@ class CentringMotor:
 
 
 def prepare(centring_motors_dict):
-    logging.getLogger("HWR").debug("Preparing for centring")
-
+    logging.debug("Preparing for centring")
+    
     global SAVED_INITIAL_POSITIONS
-    global USER_CLICKED_EVENT
-    global READY_FOR_NEXT_POINT
 
     if CURRENT_CENTRING and not CURRENT_CENTRING.ready():
-        logging.getLogger("HWR").debug("DEBUG: ENDING CURRENT CENTRING")
         end()
 
-    if USER_CLICKED_EVENT and not USER_CLICKED_EVENT.ready():
-        logging.getLogger("HWR").debug("DEBUG: USER_CLICKED_EVENT: false")
-
-        # Clear ready flag in case it was stuck
-        USER_CLICKED_EVENT.set()
-
+    global USER_CLICKED_EVENT
+    global READY_FOR_NEXT_POINT
     USER_CLICKED_EVENT = gevent.event.AsyncResult()
     READY_FOR_NEXT_POINT = gevent.event.Event()
 
-    motors_to_move = {}
+    motors_to_move = dict()
     for m in centring_motors_dict.values():
         if m.reference_position is not None:
             motors_to_move[m.motor] = m.reference_position
     move_motors(motors_to_move)
 
-    SAVED_INITIAL_POSITIONS = {
-        m.motor: m.motor.get_value() for m in centring_motors_dict.values()
-    }
+    SAVED_INITIAL_POSITIONS = dict(
+        [(m.motor, m.motor.get_value()) for m in centring_motors_dict.values()]
+    )
 
     phi = centring_motors_dict["phi"]
     phiy = centring_motors_dict["phiy"]
@@ -235,6 +225,7 @@ def centre_plate1Click(
     phi_max,
     n_points,
 ):
+
     global USER_CLICKED_EVENT
 
     try:
@@ -245,8 +236,9 @@ def centre_plate1Click(
         dy = 99999
 
         # while i < n_points and (dx > 3 or dy > 3) :
-        # NBNB is this temporary or permanent?
-        while True:  # it is now a while true loop that can be interrupted at any time by the save button, to allow user to have a 1 click centring as precise as he wants (see HutchMenuBrick)
+        while (
+            True
+        ):  # it is now a while true loop that can be interrupted at any time by the save button, to allow user to have a 1 click centring as precise as he wants (see HutchMenuBrick)
             USER_CLICKED_EVENT = gevent.event.AsyncResult()
             try:
                 x, y = USER_CLICKED_EVENT.get()
@@ -266,16 +258,20 @@ def centre_plate1Click(
             # Alterning between phi min and phi max to gradually converge to the
             # centring point
             if i % 2 == 0:
-                phi_min = phi.get_value()  # in case the phi range sent us to a position where sample is invisible, if user moves phi, this modifications is saved for future moves
+                phi_min = (
+                    phi.get_value()
+                )  # in case the phi range sent us to a position where sample is invisible, if user moves phi, this modifications is saved for future moves
                 phi.set_value(phi_max)
             else:
-                phi_max = phi.get_value()  # in case the phi range sent us to a position where sample is invisible, if user moves phi, this modifications is saved for future moves
+                phi_max = (
+                    phi.get_value()
+                )  # in case the phi range sent us to a position where sample is invisible, if user moves phi, this modifications is saved for future moves
                 phi.set_value(phi_min)
 
             READY_FOR_NEXT_POINT.set()
             i += 1
     except Exception:
-        logging.getLogger("HWR").exception("Exception while centring")
+        logging.exception("Exception while centring")
         move_motors(SAVED_INITIAL_POSITIONS)
         raise RuntimeError("Exception while centring")
 
@@ -327,11 +323,11 @@ def centre_plate(
             READY_FOR_NEXT_POINT.set()
             i += 1
     except Exception:
-        logging.getLogger("HWR").exception("Exception while centring")
+        logging.exception("Exception while centring")
         move_motors(SAVED_INITIAL_POSITIONS)
         raise
 
-    #  logging.getLogger("HWR").info("X=%s,Y=%s", X, Y)
+    # logging.info("X=%s,Y=%s", X, Y)
     chi_angle = math.radians(chi_angle)
     chiRotMatrix = numpy.matrix(
         [
@@ -352,21 +348,25 @@ def centre_plate(
     d_horizontal = d[0] - (beam_xc / float(pixelsPerMm_Hor))
     d_vertical = d[1] - (beam_yc / float(pixelsPerMm_Ver))
 
+    phi_pos = math.radians(phi.direction * phi.get_value())
+    phiRotMatrix = numpy.matrix(
+        [
+            [math.cos(phi_pos), -math.sin(phi_pos)],
+            [math.sin(phi_pos), math.cos(phi_pos)],
+        ]
+    )
+
     centred_pos = SAVED_INITIAL_POSITIONS.copy()
     centred_pos.update(
         {
             sampx.motor: float(sampx.get_value() + sampx.direction * dx),
             sampy.motor: float(sampy.get_value() + sampy.direction * dy),
-            phiz.motor: (
-                float(phiz.get_value() + phiz.direction * d_vertical[0, 0])
-                if phiz.__dict__.get("reference_position") is None
-                else phiz.reference_position
-            ),
-            phiy.motor: (
-                float(phiy.get_value() + phiy.direction * d_horizontal[0, 0])
-                if phiy.__dict__.get("reference_position") is None
-                else phiy.reference_position
-            ),
+            phiz.motor: float(phiz.get_value() + phiz.direction * d_vertical[0, 0])
+            if phiz.__dict__.get("reference_position") is None
+            else phiz.reference_position,
+            phiy.motor: float(phiy.get_value() + phiy.direction * d_horizontal[0, 0])
+            if phiy.__dict__.get("reference_position") is None
+            else phiy.reference_position,
         }
     )
 
@@ -386,10 +386,7 @@ def centre_plate(
 
 
 def ready(motor_list):
-    logging.getLogger("HWR").info([m.actuator_name for m in motor_list])
-    rstate = [m._ready() for m in motor_list]
-    logging.getLogger("HWR").info(rstate)
-    return all(rstate)
+    return all([m.is_ready() for m in motor_list])
 
 
 def wait_ready(motor_positions_dict, timeout=None):
@@ -399,9 +396,6 @@ def wait_ready(motor_positions_dict, timeout=None):
 
 
 def move_motors(motor_positions_dict):
-    if not motor_positions_dict:
-        return
-
     wait_ready(motor_positions_dict, timeout=30)
 
     for motor, position in motor_positions_dict.items():
@@ -413,9 +407,7 @@ def move_motors(motor_positions_dict):
 def user_click(x, y, wait=False):
     READY_FOR_NEXT_POINT.clear()
     USER_CLICKED_EVENT.set((x, y))
-    logging.getLogger("HWR").debug(f"Clicked registred at {x} {y}")
     if wait:
-        logging.getLogger("HWR").debug(f"Waiting for rotation ...")
         READY_FOR_NEXT_POINT.wait()
 
 
@@ -442,12 +434,8 @@ def center(
         i = 0
         while i < n_points:
             try:
-                logging.getLogger("HWR").debug("Waiting for click")
                 x, y = USER_CLICKED_EVENT.get()
             except Exception:
-                logging.getLogger("HWR").exception(
-                    "Aborted while waiting for point selection"
-                )
                 raise RuntimeError("Aborted while waiting for point selection")
             USER_CLICKED_EVENT = gevent.event.AsyncResult()
             X.append(x / float(pixelsPerMm_Hor))
@@ -457,14 +445,12 @@ def center(
                 phi.set_value_relative(phi.direction * phi_angle, timeout=10)
             READY_FOR_NEXT_POINT.set()
             i += 1
-        logging.getLogger("HWR").debug(f"Click at {x}, {y}")
     except Exception:
-        logging.getLogger("HWR").exception("Exception while centring")
+        logging.exception("Exception while centring")
         move_motors(SAVED_INITIAL_POSITIONS)
-        READY_FOR_NEXT_POINT.set()
         raise RuntimeError("Exception while centring")
 
-    logging.getLogger("HWR").debug("X=%s,Y=%s", X, Y)
+    # logging.info("X=%s,Y=%s", X, Y)
     chi_angle = math.radians(chi_angle)
     chiRotMatrix = numpy.matrix(
         [
@@ -486,22 +472,24 @@ def center(
     d_vertical = d[1] - (beam_yc / float(pixelsPerMm_Ver))
 
     phi_pos = math.radians(phi.direction * phi.get_value())
+    phiRotMatrix = numpy.matrix(
+        [
+            [math.cos(phi_pos), -math.sin(phi_pos)],
+            [math.sin(phi_pos), math.cos(phi_pos)],
+        ]
+    )
 
     centred_pos = SAVED_INITIAL_POSITIONS.copy()
     centred_pos.update(
         {
             sampx.motor: float(sampx.get_value() + sampx.direction * dx),
             sampy.motor: float(sampy.get_value() + sampy.direction * dy),
-            phiz.motor: (
-                float(phiz.get_value() + phiz.direction * d_vertical[0, 0])
-                if phiz.__dict__.get("reference_position") is None
-                else phiz.reference_position
-            ),
-            phiy.motor: (
-                float(phiy.get_value() + phiy.direction * d_horizontal[0, 0])
-                if phiy.__dict__.get("reference_position") is None
-                else phiy.reference_position
-            ),
+            phiz.motor: float(phiz.get_value() + phiz.direction * d_vertical[0, 0])
+            if phiz.__dict__.get("reference_position") is None
+            else phiz.reference_position,
+            phiy.motor: float(phiy.get_value() + phiy.direction * d_horizontal[0, 0])
+            if phiy.__dict__.get("reference_position") is None
+            else phiy.reference_position,
         }
     )
 
@@ -510,18 +498,17 @@ def center(
 
 def end(centred_pos=None):
     if centred_pos is None:
-        centred_pos = CURRENT_CENTRING.get(timeout=1)
+        centred_pos = CURRENT_CENTRING.get()
     try:
         move_motors(centred_pos)
     except Exception:
         READY_FOR_NEXT_POINT.set()
         move_motors(SAVED_INITIAL_POSITIONS)
-        logging.getLogger("HWR").exception("")
         raise RuntimeError("Centring aborted")
 
 
 def start_auto(
-    sample_view,
+    camera,
     centring_motors_dict,
     pixelsPerMm_Hor,
     pixelsPerMm_Ver,
@@ -538,7 +525,7 @@ def start_auto(
 
     CURRENT_CENTRING = gevent.spawn(
         auto_center,
-        sample_view,
+        camera,
         phi,
         phiy,
         phiz,
@@ -556,22 +543,14 @@ def start_auto(
     return CURRENT_CENTRING
 
 
-def find_loop(sample_view, pixelsPerMm_Hor, chi_angle, msg_cb, new_point_cb):
+def find_loop(camera, pixelsPerMm_Hor, chi_angle, msg_cb, new_point_cb):
     snapshot_filename = os.path.join(
         tempfile.gettempdir(), "mxcube_sample_snapshot.png"
     )
-    sample_view.save_snapshot(snapshot_filename, overlay=False, bw=True)
-
-    # Lucid does not accept 0 degree rotation and
-    # has a reference frame that is reversed to the one used
-    # in MXCuBE
-    if chi_angle == 0:
-        chi_angle = None
-    else:
-        chi_angle = -chi_angle
+    camera.take_snapshot(snapshot_filename, bw=True)
 
     info, x, y = lucid.find_loop(
-        snapshot_filename, rotation=chi_angle, debug=False, IterationClosing=6
+        snapshot_filename, rotation=None, debug=False, IterationClosing=6
     )
 
     try:
@@ -589,7 +568,7 @@ def find_loop(sample_view, pixelsPerMm_Hor, chi_angle, msg_cb, new_point_cb):
 
 
 def auto_center(
-    sample_view,
+    camera,
     phi,
     phiy,
     phiz,
@@ -604,14 +583,12 @@ def auto_center(
     msg_cb,
     new_point_cb,
 ):
-    imgWidth = sample_view.camera.get_width()
-    imgHeight = sample_view.camera.get_height()
+    imgWidth = camera.get_width()
+    imgHeight = camera.get_height()
 
     # check if loop is there at the beginning
     i = 0
-    while -1 in find_loop(
-        sample_view, pixelsPerMm_Hor, chi_angle, msg_cb, new_point_cb
-    ):
+    while -1 in find_loop(camera, pixelsPerMm_Hor, chi_angle, msg_cb, new_point_cb):
         phi.set_value_relative(90)
         i += 1
         if i > 4:
@@ -639,20 +616,14 @@ def auto_center(
         )
 
         for a in range(n_points):
-            x, y = find_loop(
-                sample_view, pixelsPerMm_Hor, chi_angle, msg_cb, new_point_cb
-            )
-            logging.getLogger("HWR").info("Lucid found loop at, x=%f, y=%f", x, y)
+            x, y = find_loop(camera, pixelsPerMm_Hor, chi_angle, msg_cb, new_point_cb)
+            # logging.info("in autocentre, x=%f, y=%f",x,y)
             if x < 0 or y < 0:
                 for i in range(1, 18):
-                    logging.getLogger("HWR").info("loop not found - moving back %d" % i)
+                    # logging.info("loop not found - moving back %d" % i)
                     phi.set_value_relative(5)
                     x, y = find_loop(
-                        sample_view,
-                        pixelsPerMm_Hor,
-                        chi_angle,
-                        msg_cb,
-                        new_point_cb,
+                        camera, pixelsPerMm_Hor, chi_angle, msg_cb, new_point_cb
                     )
                     if -1 in (x, y):
                         continue
@@ -671,9 +642,6 @@ def auto_center(
                             break
                 if -1 in (x, y):
                     centring_greenlet.kill()
-                    logging.getLogger("HWR").debug(
-                        f"DEBUG: Incorrect position from auto loop centring {(x, y)}"
-                    )
                     raise RuntimeError("Could not centre sample automatically.")
                 phi.set_value_relative(-i * 5)
             else:

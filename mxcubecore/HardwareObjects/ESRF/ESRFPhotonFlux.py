@@ -1,6 +1,6 @@
 # encoding: utf-8
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -18,105 +18,83 @@
 #  You should have received a copy of the GNU General Lesser Public License
 #  along with MXCuBE. If not, see <http://www.gnu.org/licenses/>.
 
-"""Photon flux calculations
-Example xml_ configuration:
-
-.. code-block:: yaml
-
- class: ESRF.ESRFPhotonFlux.ESRFPhotonFlux
-  configuration:
-    counter_name: i0
-    threshold: 5000000000.0
-    username: Photon flux
-  objects:
-    aperture: udiff_aperture.yaml
-    controller: bliss.yaml
+""" Photon fluc calculations
+Example xml file:
+<object class="ESRF.ESRFPhotonFlux">
+  <username>Photon flux</username>
+  <object role="controller" href="/bliss"/>
+  <object role="aperture" href="/udiff_aperture"/>
+  <counter_name>i0</counter_name>
+</object>
 """
-
-from gevent import sleep, spawn
+import logging
+import gevent
 
 from mxcubecore import HardwareRepository as HWR
 from mxcubecore.HardwareObjects.abstract.AbstractFlux import AbstractFlux
 
 
 class ESRFPhotonFlux(AbstractFlux):
-    """Photon flux calculation"""
+    """Photon flux calculation for ID30B"""
 
     def __init__(self, name):
-        super().__init__(name)
+        super(ESRFPhotonFlux, self).__init__(name)
         self._counter = None
         self._flux_calc = None
-        self.counter_name = None
+        self._aperture = None
         self.threshold = None
-        self.controller = None
 
     def init(self):
         """Initialisation"""
-        super().init()
-        self.threshold = self.threshold or 0.0
-        self.controller = self.get_object_by_role("controller")
+        super(ESRFPhotonFlux, self).init()
+        controller = self.get_object_by_role("controller")
+
+        self._aperture = self.get_object_by_role("aperture")
+        self.threshold = self.get_property("threshold") or 0.0
 
         try:
-            self._flux_calc = self.controller.CalculateFlux()
+            self._flux_calc = controller.CalculateFlux()
             self._flux_calc.init()
         except AttributeError:
-            self.log.exception("Could not get flux calculation from BLISS")
-        counter_name = self.get_property("counter_name")
+            logging.getLogger("HWR").exception(
+                "Could not get flux calculation from BLISS"
+            )
 
-        if counter_name:
-            self._counter = getattr(self.controller, counter_name)
+        counter = self.get_property("counter_name")
+        if counter:
+            self._counter = getattr(controller, counter)
         else:
-            self.log.exception("Counter to read the flux is not configured")
+            self._counter = self.get_object_by_role("counter")
 
-        try:
-            HWR.beamline.safety_shutter.connect("stateChanged", self.update_value)
-        except AttributeError as err:
-            raise RuntimeError("Safety shutter is not configured") from err
-
-        self._poll_task = spawn(self._poll_flux)
+        HWR.beamline.safety_shutter.connect("stateChanged", self.update_value)
+        self._poll_task = gevent.spawn(self._poll_flux)
 
     def _poll_flux(self):
-        """Poll the flux every 3 seconds"""
         while True:
             self.re_emit_values()
-            sleep(3)
+            gevent.sleep(0.5)
 
     def get_value(self):
-        """Get the flux value as function of a diode reading, the energy
-           and the aperture factor (if any).
-        Returns:
-            (float): The flux value or 0 if below the pre-defined threshold.
+        """Calculate the flux value as function of a reading
         """
+
         counts = self._counter.raw_read
         if isinstance(counts, list):
             counts = float(counts[0])
+        counts = float(self._counter.raw_read)
         if counts == -9999:
-            # no good value from the diode
-            return 0.0
+            counts = 0.0
+
+        egy = HWR.beamline.energy.get_value() * 1000.0
+        calib = self._flux_calc.calc_flux_factor(egy)[self._counter.name]
 
         try:
-            egy = HWR.beamline.energy.get_value()
-            calib = self._flux_calc.calc_flux_factor(egy * 1000.0)[
-                self._counter.diode.name
-            ]
+            label = self._aperture.get_value().name
+            aperture_factor = self._aperture.get_factor(label)
         except AttributeError:
-            egy = 0
-            calib = 0
-
-        factor = 1.0
-        try:
-            aperture = HWR.beamline.diffractometer.aperture
-            label = aperture.get_value().name
-            aperture_factor = aperture.get_factor(label)
-            if isinstance(aperture_factor, tuple):
-                factor = aperture_factor[0] + aperture_factor[1] * egy
-            else:
-                factor = float(aperture_factor)
-        except AttributeError:
-            factor = 1.0
-
-        counts = abs(counts * calib * factor)
+            aperture_factor = 1
+        counts = abs(counts * calib * aperture_factor)
         if counts < self.threshold:
-            return 0.0
+            counts = 0.0
 
         return counts

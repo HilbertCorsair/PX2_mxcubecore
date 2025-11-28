@@ -1,9 +1,8 @@
+import sys
 import logging
 import math
-
 import gevent
-
-from mxcubecore.BaseHardwareObjects import HardwareObject
+from mxcubecore.BaseHardwareObjects import Equipment
 
 """
 Example xml file:
@@ -23,7 +22,7 @@ If used, the controller should have method moveEnergy.
 """
 
 
-class Energy(HardwareObject):
+class Energy(Equipment):
     def init(self):
         self.ready_event = gevent.event.Event()
         self.energy_motor = None
@@ -36,22 +35,22 @@ class Energy(HardwareObject):
         try:
             self.energy_motor = self.get_object_by_role("energy")
         except KeyError:
-            self.log.warning("Energy: error initializing energy motor")
+            logging.getLogger("HWR").warning("Energy: error initializing energy motor")
 
         try:
             self.default_en = self.get_property("default_energy")
         except KeyError:
-            self.log.warning("Energy: no default energy")
+            logging.getLogger("HWR").warning("Energy: no default energy")
 
         try:
             self.tunable = self.get_property("tunable_energy")
         except KeyError:
-            self.log.warning("Energy: will set to fixed energy")
+            logging.getLogger("HWR").warning("Energy: will set to fixed energy")
 
         try:
             self.ctrl = self.get_object_by_role("controller")
         except KeyError:
-            self.log.info("No controller used")
+            logging.getLogger("HWR").info("No controller used")
 
         if self.energy_motor is not None:
             self.energy_motor.connect("valueChanged", self.energyPositionChanged)
@@ -65,7 +64,9 @@ class Energy(HardwareObject):
             try:
                 return self.energy_motor.get_value()
             except Exception:
-                self.log.exception("EnergyHO: could not read current energy")
+                logging.getLogger("HWR").exception(
+                    "EnergyHO: could not read current energy"
+                )
                 return None
         return self.default_en
 
@@ -76,7 +77,7 @@ class Energy(HardwareObject):
         return None
 
     def get_limits(self):
-        self.log.debug("Get energy limits")
+        logging.getLogger("HWR").debug("Get energy limits")
         if not self.tunable:
             energy = self.get_value()
             return (energy, energy)
@@ -86,12 +87,14 @@ class Energy(HardwareObject):
                 self.en_lims = self.energy_motor.get_limits()
                 return self.en_lims
             except Exception:
-                self.log.exception("EnergyHO: could not read energy motor limits")
+                logging.getLogger("HWR").exception(
+                    "EnergyHO: could not read energy motor limits"
+                )
                 return None
         return None
 
     def get_wavelength_limits(self):
-        self.log.debug("Get wavelength limits")
+        logging.getLogger("HWR").debug("Get wavelength limits")
         if not self.tunable:
             return None
         self.en_lims = self.get_limits()
@@ -150,16 +153,16 @@ class Energy(HardwareObject):
         self.emit("moveEnergyFinished", ())
 
     def checkLimits(self, value):
-        self.log.debug("Checking the move limits")
+        logging.getLogger("HWR").debug("Checking the move limits")
         if self.get_limits():
             if value >= self.en_lims[0] and value <= self.en_lims[1]:
-                self.log.info("Limits ok")
+                logging.getLogger("HWR").info("Limits ok")
                 return True
             logging.getLogger("user_level_log").info("Requested value is out of limits")
         return False
 
     # def start_move_wavelength(self, value, wait=True):
-    #     self.log.info("Moving wavelength to (%s)" % value)
+    #     logging.getLogger("HWR").info("Moving wavelength to (%s)" % value)
     #     return self.startMoveEnergy(12.3984 / value, wait)
 
     def cancelMoveEnergy(self):
@@ -170,11 +173,11 @@ class Energy(HardwareObject):
         current_en = self.get_value()
         pos = math.fabs(current_en - energy)
         if pos < 0.001:
-            logging.getLogger("user_level_log").info(
+            logging.getLogger("user_level_log").debug(
                 "Energy: already at %g, not moving", energy
             )
         else:
-            logging.getLogger("user_level_log").info(
+            logging.getLogger("user_level_log").debug(
                 "Energy: moving energy to %g", energy
             )
             if pos > 0.02:

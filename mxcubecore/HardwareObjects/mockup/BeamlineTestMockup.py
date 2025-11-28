@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -23,14 +23,16 @@ BeamlineTestMockup
 """
 
 import os
+import logging
 import tempfile
 from datetime import datetime
 
 import gevent
 
-from mxcubecore import HardwareRepository as HWR
-from mxcubecore.BaseHardwareObjects import HardwareObject
 from mxcubecore.HardwareObjects import SimpleHTML
+from mxcubecore.BaseHardwareObjects import HardwareObject
+from mxcubecore import HardwareRepository as HWR
+
 
 __credits__ = ["MXCuBE collaboration"]
 
@@ -78,7 +80,7 @@ class BeamlineTestMockup(HardwareObject):
             self.test_directory = os.path.join(
                 tempfile.gettempdir(), "mxcube", "beamline_test"
             )
-            self.log.debug(
+            logging.getLogger("HWR").debug(
                 "BeamlineTest: directory for test "
                 "reports not defined. Set to: %s" % self.test_directory
             )
@@ -92,7 +94,7 @@ class BeamlineTestMockup(HardwareObject):
             for test in eval(self.get_property("available_tests")):
                 self.available_tests_dict[test] = TEST_DICT[test]
         except Exception:
-            self.log.debug(
+            logging.getLogger("HWR").debug(
                 "BeamlineTest: Available tests are "
                 + "not defined in xml. Setting all tests as available."
             )
@@ -102,7 +104,7 @@ class BeamlineTestMockup(HardwareObject):
         try:
             self.startup_test_list = eval(self.get_property("startup_tests"))
         except Exception:
-            self.log.debug("BeamlineTest: Test list not defined.")
+            logging.getLogger("HWR").debug("BeamlineTest: Test list not defined.")
 
         if self.get_property("run_tests_at_startup") is True:
             self.start_test_queue(self.startup_test_list)
@@ -113,22 +115,22 @@ class BeamlineTestMockup(HardwareObject):
         """
         if create_report:
             try:
-                self.log.debug(
+                logging.getLogger("HWR").debug(
                     "BeamlineTest: Creating directory %s" % self.test_directory
                 )
                 if not os.path.exists(self.test_directory):
                     os.makedirs(self.test_directory)
 
-                self.log.debug(
+                logging.getLogger("HWR").debug(
                     "BeamlineTest: Creating source directory %s"
                     % self.test_source_directory
                 )
                 if not os.path.exists(self.test_source_directory):
                     os.makedirs(self.test_source_directory)
             except Exception:
-                self.log.warning("BeamlineTest: Unable to create test directories")
-
-                self.log.exception("")
+                logging.getLogger("HWR").warning(
+                    "BeamlineTest: Unable to create test directories"
+                )
                 return
 
         self.results_list = []
@@ -137,7 +139,7 @@ class BeamlineTestMockup(HardwareObject):
             test_method_name = "test_" + test_name.lower()
             if hasattr(self, test_method_name):
                 if test_name in TEST_DICT:
-                    self.log.debug(
+                    logging.getLogger("HWR").debug(
                         "BeamlineTest: Executing test %s (%s)"
                         % (test_name, TEST_DICT[test_name])
                     )
@@ -195,7 +197,7 @@ class BeamlineTestMockup(HardwareObject):
                     msg
                     % (TEST_COLORS_FONT[False], test_method_name, TEST_DICT[test_name])
                 )
-                self.log.error(
+                logging.getLogger("HWR").error(
                     "BeamlineTest: Test method %s not available" % test_method_name
                 )
             self.results_html_list.append("</p>\n<hr>")
@@ -287,11 +289,11 @@ class BeamlineTestMockup(HardwareObject):
             output_file.close()
 
             self.emit("htmlGenerated", html_filename)
-            self.log.info(
+            logging.getLogger("HWR").info(
                 "BeamlineTest: Test result written in file %s" % html_filename
             )
         except Exception:
-            self.log.error(
+            logging.getLogger("HWR").error(
                 "BeamlineTest: Unable to generate html report file %s" % html_filename
             )
 

@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -17,21 +17,20 @@
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with MXCuBE. If not, see <http://www.gnu.org/licenses/>.
 
-"""AbstractNState class - interface for N state devices.
-Defines BaseValueEnum, initialise_values and value_to_enum methods.
+""" AbstractNState class - interface for N state devices.
+Defines BaseValueEnum, initialise_values and value_to_enum methds.
 Implements validate_value, set/update limits.
 """
 
 import abc
 import ast
-from enum import (
-    Enum,
-    unique,
+from enum import Enum, unique
+from mxcubecore.HardwareObjects.abstract.AbstractActuator import (
+    AbstractActuator,
 )
 
-from mxcubecore.HardwareObjects.abstract.AbstractActuator import AbstractActuator
 
-__copyright__ = """ Copyright © 2010-2022 by the MXCuBE collaboration """
+__copyright__ = """ Copyright 2020 by the MXCuBE collaboration """
 __license__ = "LGPLv3+"
 
 
@@ -48,14 +47,13 @@ class AbstractNState(AbstractActuator):
     __metaclass__ = abc.ABCMeta
     VALUES = BaseValueEnum
 
+    def __init__(self, name):
+        AbstractActuator.__init__(self, name)
+
     def init(self):
-        """Initialise the predefined values"""
-        super().init()
+        """Initilise the predefined values"""
+        AbstractActuator.init(self)
         self.initialise_values()
-        # default_value should be an Enum, if defined
-        if self.default_value is not None and not isinstance(self.default_value, Enum):
-            self.default_value = self.value_to_enum(self.default_value)
-            self.update_value(self.default_value)
 
     def validate_value(self, value):
         """Check if the value is one of the predefined values.
@@ -85,27 +83,27 @@ class AbstractNState(AbstractActuator):
         raise NotImplementedError
 
     def initialise_values(self):
-        """Initialise the ValueEnum with the values from the config."""
+        """Initialise the ValueEnum with the values from the config.
+        """
         try:
             values = ast.literal_eval(self.get_property("values"))
             values_dict = dict(**{item.name: item.value for item in self.VALUES})
             values_dict.update(values)
             self.VALUES = Enum("ValueEnum", values_dict)
         except (ValueError, TypeError):
-            self.log.exception("")
+            pass
 
-    def value_to_enum(self, value, idx=0):
-        """Transform a value to Enum
+    def value_to_enum(self, value):
+        """Tranform a value to Enum
         Args:
            value(str, int, float, tuple): value
-           idx(int): Index in the value, if tuple
         Returns:
             (Enum): Enum member, corresponding to the value or UNKNOWN.
         """
-        for enum_var in self.VALUES:
+        for enum_var in self.VALUES.__members__.values():
             if value == enum_var.value:
                 return enum_var
-            if isinstance(enum_var.value, tuple) and value == enum_var.value[idx]:
+            if isinstance(enum_var.value, tuple) and value == enum_var.value[0]:
                 return enum_var
 
         return self.VALUES.UNKNOWN
@@ -115,7 +113,7 @@ class AbstractNState(AbstractActuator):
         self.update_value(self.get_value())
 
         # NB DO NOT 'FIX', this is deliberate.
-        # One would normally call super(AbstractNState ...), however we
-        # want to call re_emit_values of HardwareObject to avoid the limit
-        # handling implemented in AbstractActuator
+        # One would normally call super(AbstractNState ...), however we want to call
+        # re_emit_values of HardwareObject to avoid the limit handling implemented in
+        # AbstractActuator
         super(AbstractActuator, self).re_emit_values()

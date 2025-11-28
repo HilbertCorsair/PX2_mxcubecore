@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
+import logging
+from mxcubecore.BaseHardwareObjects import Device
 
-from mxcubecore.BaseHardwareObjects import HardwareObject
 
+class PX1Pss(Device):
 
-class PX1Pss(HardwareObject):
     states = {0: "not ready", 1: "ready"}
 
     def init(self):
@@ -12,7 +13,7 @@ class PX1Pss(HardwareObject):
 
     def value_changed(self, value):
         state = self.get_state(value)
-        self.log.debug("state changed. value is %s" % state)
+        logging.getLogger("HWR").debug("state changed. value is %s" % state)
         self.emit("stateChanged", (state,))
 
     def get_state(self, value=None):

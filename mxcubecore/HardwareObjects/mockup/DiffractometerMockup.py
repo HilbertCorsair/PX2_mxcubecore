@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -17,18 +17,16 @@
 #   You should have received a copy of the GNU Lesser General Public License
 #  along with MXCuBE. If not, see <http://www.gnu.org/licenses/>.
 
+import time
 import logging
 import random
-import time
 import warnings
 
-from gevent.event import AsyncResult
-
-from mxcubecore import HardwareRepository as HWR
 from mxcubecore.HardwareObjects.GenericDiffractometer import (
     GenericDiffractometer,
-    PhaseEnum,
 )
+from mxcubecore import HardwareRepository as HWR
+from gevent.event import AsyncResult
 
 
 class DiffractometerMockup(GenericDiffractometer):
@@ -36,24 +34,11 @@ class DiffractometerMockup(GenericDiffractometer):
     Descript. :
     """
 
-    def __init__(self, name):
+    def __init__(self, *args):
         """
         Descript. :
         """
-        GenericDiffractometer.__init__(self, name)
-
-        # child object slots
-        self.backlight = None
-        self.backlightswitch = None
-        self.beamstop_distance = None
-        self.focus = None
-        self.frontlight = None
-        self.frontlightswitch = None
-        self.phi = None
-        self.phiy = None
-        self.phiz = None
-        self.sampx = None
-        self.sampy = None
+        GenericDiffractometer.__init__(self, *args)
 
     def init(self):
         """
@@ -146,7 +131,6 @@ class DiffractometerMockup(GenericDiffractometer):
         """
         for click in range(3):
             self.user_clicked_event = AsyncResult()
-            self.waiting_for_click = True
             x, y = self.user_clicked_event.get()
             if click < 2:
                 self.motor_hwobj_dict["phi"].set_value_relative(90)
@@ -183,9 +167,10 @@ class DiffractometerMockup(GenericDiffractometer):
                 if abs(val) > var_limit:
                     val *= 1 - var_range / var_limit
                 result[tag] = val
+        #
         return result
 
-    def is_ready(self) -> bool:
+    def is_ready(self):
         """
         Descript. :
         """
@@ -350,8 +335,8 @@ class DiffractometerMockup(GenericDiffractometer):
             "endTime": curr_time,
         }
         motors = self.get_positions()
-        # motors["beam_x"] = 0.1
-        # motors["beam_y"] = 0.1
+        motors["beam_x"] = 0.1
+        motors["beam_y"] = 0.1
         self.last_centred_position[0] = coord_x
         self.last_centred_position[1] = coord_y
         self.centring_status["motors"] = motors
@@ -401,24 +386,3 @@ class DiffractometerMockup(GenericDiffractometer):
 
     def get_point_from_line(self, point_one, point_two, index, images_num):
         return point_one.as_dict()
-
-    def abort(self) -> None:
-        return None
-
-    def status(self) -> str:
-        return "READY"
-
-    def my_fancy_function(
-        self, speed: float, num_images: int, exp_time: float, phase: PhaseEnum
-    ) -> bool:
-        return True
-
-    def my_other_funny_function(self) -> None:
-        pass
-
-    def ssx_chip_scan(self, parameters):
-        return
-
-    def move_chip_to(self, x: int, y: int) -> None:
-        print("moving chip to")
-        return

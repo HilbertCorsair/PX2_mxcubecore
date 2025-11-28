@@ -1,4 +1,4 @@
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -16,87 +16,66 @@
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with MXCuBE. If not, see <http://www.gnu.org/licenses/>.
 
-
-from enum import (
-    Enum,
-    unique,
-)
-
 import gevent
 
-from mxcubecore.HardwareObjects.abstract.AbstractShutter import AbstractShutter
+from mxcubecore.BaseHardwareObjects import Device
+
 
 __credits__ = ["EMBL Hamburg"]
 __license__ = "LGPLv3+"
 __category__ = "General"
 
 
-@unique
-class ShutterValueEnum(Enum):
-    """Defines only the compulsory values."""
-
-    OPEN = "Open"
-    CLOSED = "Closed"
-    UNKNOWN = "Unknown"
-    DISABLED = "Disabled"
-
-
-class MDFastShutter(AbstractShutter):
+class MDFastShutter(Device):
     """
     MD Fast shutter
     """
 
-    VALUES = ShutterValueEnum
+    shutterState = {3: "unknown", 1: "closed", 0: "opened", 46: "disabled"}
 
     def __init__(self, name):
         """
         init
         :param name:
         """
-        super(MDFastShutter, self).__init__(name)
+        Device.__init__(self, name)
 
-        self._nominal_limits = None
-
-        self.chan_shutter_is_open = None
+        self.chan_shutter_state = None
         self.chan_current_phase = None
 
-        self.shutter_is_open = None
+        self.state_bit = None
+        self.states_dict = None
+        self.state = None
         self.current_phase = None
 
     def init(self):
-        super(MDFastShutter, self).init()
-
-        self.chan_shutter_is_open = self.get_channel_object("chanShutterIsOpen")
-        if self.chan_shutter_is_open:
-            self.chan_shutter_is_open.connect_signal(
-                "update", self.shutter_is_open_changed
-            )
+        """
+        init
+        :return:
+        """
+        self.states_dict = {False: "closed", True: "opened"}
 
         self.chan_current_phase = self.get_channel_object("chanCurrentPhase")
         if self.chan_current_phase is not None:
             self.current_phase = self.chan_current_phase.get_value()
             self.connect(self.chan_current_phase, "update", self.current_phase_changed)
 
-    def shutter_is_open_changed(self, value):
+        self.chan_shutter_state = self.get_channel_object("chanShutterState")
+        if self.chan_shutter_state:
+            self.chan_shutter_state.connect_signal("update", self.shutter_state_changed)
+
+    def shutter_state_changed(self, value):
         """
         Shutter state changed event
         :param value:
         :return:
         """
-        self.shutter_is_open = value
-        # We allow to control the fast shutter just in the beam location phase
+        self.state_bit = value
         if self.current_phase == "BeamLocation":
-            if value:
-                value = self.VALUES.OPEN
-            else:
-                value = self.VALUES.CLOSED
+            self.state = self.states_dict.get(value, "unknown")
         else:
-            value = self.VALUES.DISABLED
-        print("is open changed ", value, self.shutter_is_open)
-        self.update_value(value)
-
-    def get_value(self):
-        return self._nominal_value
+            self.state = "disabled"
+        self.emit("shutterStateChanged", (self.state, self.state.title()))
 
     def current_phase_changed(self, value):
         """
@@ -105,32 +84,47 @@ class MDFastShutter(AbstractShutter):
         :return:
         """
         self.current_phase = value
-        self.shutter_is_open_changed(self.chan_shutter_is_open.get_value())
+        if self.chan_shutter_state:
+            self.shutter_state_changed(self.chan_shutter_state.get_value())
 
-    def _set_value(self, value):
-        if value == self.VALUES.OPEN:
-            self.chan_shutter_is_open.set_value(True)
-        elif value == self.VALUES.CLOSED:
-            self.chan_shutter_is_open.set_value(False)
+    def getShutterState(self):
+        """
+        Returns shutter state
+        :return:
+        """
+        self.shutter_state_changed(self.chan_shutter_state.get_value())
+        return self.state
 
-    def open_delete(self, wait=True):
+    def openShutter(self, wait=True):
         """
         Opens the shutter
         :param wait:
         :return:
         """
-        self.chan_shutter_is_open.set_value(True)
+        self.chan_shutter_state.set_value(True)
         with gevent.Timeout(10, Exception("Timeout waiting for fast shutter open")):
-            while not self.shutter_is_open:
+            while not self.state_bit:
                 gevent.sleep(0.1)
 
-    def close_delete(self, wait=True):
+    def is_opened(self):
+        """
+        Returns True if the shutter is opened
+        :return:
+        """
+        return self.chan_shutter_state.get_value()
+
+    def closeShutter(self, wait=True):
         """
         Closes shutter
         :param wait: boolean
         :return:
         """
-        self.chan_shutter_is_open.set_value(False)
-        with gevent.Timeout(10, Exception("Timeout waiting for fast shutter close")):
-            while self.shutter_is_open:
-                gevent.sleep(0.1)
+        self.shutter_state_changed(self.chan_shutter_state.get_value())
+
+        if self.is_opened():
+            self.chan_shutter_state.set_value(False)
+            with gevent.Timeout(
+                10, Exception("Timeout waiting for fast shutter close")
+            ):
+                while self.state_bit:
+                    gevent.sleep(0.1)

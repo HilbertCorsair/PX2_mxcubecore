@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -18,19 +18,25 @@
 #  along with MXCuBE. If not, see <http://www.gnu.org/licenses/>.
 
 import logging
-
 import gevent
 
-from mxcubecore.HardwareObjects.abstract.AbstractXRFSpectrum import AbstractXRFSpectrum
+from mxcubecore.HardwareObjects.abstract.AbstractXRFSpectrum import (
+    AbstractXRFSpectrum,
+)
+from mxcubecore.BaseHardwareObjects import HardwareObject
+
+from mxcubecore import HardwareRepository as HWR
+
 
 __credits__ = ["EMBL Hamburg"]
 __license__ = "LGPLv3+"
 __category__ = "Task"
 
 
-class EMBLXRFSpectrum(AbstractXRFSpectrum):
+class EMBLXRFSpectrum(AbstractXRFSpectrum, HardwareObject):
     def __init__(self, name):
-        AbstractXRFSpectrum.__init__(self, name)
+        AbstractXRFSpectrum.__init__(self)
+        HardwareObject.__init__(self, name)
 
         self.ready_event = None
         self.spectrum_running = None
@@ -86,20 +92,20 @@ class EMBLXRFSpectrum(AbstractXRFSpectrum):
         """Controls execution"""
         if self.spectrum_running:
             if status == "scaning":
-                self.log.info("XRF spectrum in progress...")
+                logging.getLogger("HWR").info("XRF spectrum in progress...")
             elif status == "ready":
                 if self.spectrum_running:
                     self.spectrum_data = list(self.cmd_spectrum_start.get())
                     # self.mca_calib = self.chan_spectrum_consts.get_value()[::-1]
                     self.spectrum_command_finished()
-                    self.log.info("XRF spectrum finished")
+                    logging.getLogger("HWR").info("XRF spectrum finished")
             elif status == "aborting":
                 if self.spectrum_running:
                     self.spectrum_command_aborted()
-                    self.log.info("XRF spectrum aborted!")
+                    logging.getLogger("HWR").info("XRF spectrum aborted!")
             elif status == "error":
                 self.spectrum_command_failed()
-                self.log.error("XRF spectrum failed!")
+                logging.getLogger("HWR").error("XRF spectrum failed!")
 
     def cancel_spectrum(self, *args):
         """Cancels acquisition"""

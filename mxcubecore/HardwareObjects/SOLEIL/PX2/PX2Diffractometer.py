@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -17,27 +17,47 @@
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with MXCuBE. If not, see <http://www.gnu.org/licenses/>.
 
-import copy
-import datetime
-import logging
 import os
-import pickle
+import sys
 import time
-from math import sqrt
-
-import beam_align
-import gevent
+import logging
+import traceback
+import pickle
+import copy
 import h5py
 import numpy as np
-import optical_alignment
-import scan_and_align
-from anneal import anneal as anneal_procedure
-from camera import camera
-from detector import detector
-from goniometer import goniometer
 from scipy.optimize import minimize
+from math import sqrt
+import gevent
+import redis
 
-from mxcubecore.model.queue_model_enumerables import CENTRING_METHOD
+
+try:
+    from goniometer import goniometer
+    from detector import detector
+    from oav_camera import oav_camera as camera
+    from scan_and_align import scan_and_align
+    from optical_alignment import optical_alignment
+    from anneal import anneal as anneal_procedure
+    from diffraction_tomography import diffraction_tomography
+    from history_saver import get_jpegs_from_arrays
+    from useful_routines import get_string_from_timestamp
+except ModuleNotFoundError:
+    from experimental_methods import (
+        goniometer,
+        detector,
+        oav_camera as camera,
+        optical_alignment,
+        scan_and_align,
+        anneal as anneal_procedure,
+        diffraction_tomography,
+        get_jpegs_from_arrays,
+    )
+    from useful_routines import get_string_from_timestamp
+
+from queue_model_enumerables import CENTRING_METHOD
+
+dt = h5py.special_dtype(vlen=np.dtype("uint8"))
 
 try:
     import lmfit
@@ -58,13 +78,22 @@ except ImportError:
             "Could not find autocentring library, automatic centring is disabled"
         )
 
-from mxcubecore import HardwareRepository as HWR
-from mxcubecore.HardwareObjects.GenericDiffractometer import GenericDiffractometer
+from mxcubecore.HardwareObjects.GenericDiffractometer import (
+    GenericDiffractometer,
+    DiffractometerState,
+)
+
 from mxcubecore.TaskUtils import task
+from mxcubecore import HardwareRepository as HWR
+from mxcubecore.utils import qt_import
 
 __credits__ = ["SOLEIL"]
 __version__ = "2.3."
 __category__ = "General"
+
+
+# sys.path.insert(0, "/usr/local/experimental_methods")
+# from speech import speech
 
 
 class PX2Diffractometer(GenericDiffractometer):
@@ -92,12 +121,15 @@ class PX2Diffractometer(GenericDiffractometer):
         Description:
         """
         GenericDiffractometer.__init__(self, *args)
+        # speech.__init__(self, port=5555, service="mxcube", verbose=True)
 
         # Hardware objects ----------------------------------------------------
         self.zoom_motor_hwobj = None
+        self.camera_hwobj = None
         self.omega_reference_motor = None
         self.centring_hwobj = None
         self.minikappa_correction_hwobj = None
+        self.detector_distance_motor_hwobj = None
         self.nclicks = None
         self.step = None
         self.centring_method = None
@@ -118,24 +150,33 @@ class PX2Diffractometer(GenericDiffractometer):
         self.cmd_start_auto_focus = None
         self.cmd_get_omega_scan_limits = None
         self.cmd_save_centring_positions = None
-        self.centring_time = None
+        self.centring_time = time.time()
         # Internal values -----------------------------------------------------
         self.use_sc = False
         self.omega_reference_pos = [0, 0]
-        self.reference_pos = [680, 512]
+        self.reference_pos = [608, 512]  # [800, 600] #[680, 512]
 
         self.goniometer = goniometer()
         self.camera = camera()
         self.detector = detector()
 
-        self.md2_to_mxcube = dict(
+        self.md_to_mxcube = dict(
             [(key, value) for key, value in self.motor_name_mapping]
         )
-        self.mxcube_to_md2 = dict(
+        self.mxcube_to_md = dict(
             [(value, key) for key, value in self.motor_name_mapping]
         )
 
-        self.log = self.log
+        try:
+            self.archive_directory = HWR.beamline.session.get_archive_directory()
+        except:
+            self.archive_directory = "%s/manual_optical_alignment" % os.getenv("HOME")
+
+        self.oa = optical_alignment(
+            directory=self.archive_directory, name_pattern="auto_%s" % os.getuid()
+        )
+        self.redis = redis.StrictRedis(host="localhost")
+        self.log = logging.getLogger("HWR")
 
     def init(self):
         """
@@ -155,7 +196,9 @@ class PX2Diffractometer(GenericDiffractometer):
 
         self.chan_calib_x = self.get_channel_object("CoaxCamScaleX")
         self.chan_calib_y = self.get_channel_object("CoaxCamScaleY")
-        self.update_pixels_per_mm()
+        self.chan_zoom_position = self.get_channel_object("ZoomPosition")
+        self.chan_zoom_position.connect_signal("update", self.update_pixels_per_mm)
+        # self.update_pixels_per_mm()
 
         self.chan_head_type = self.get_channel_object("HeadType")
         self.head_type = self.chan_head_type.get_value()
@@ -163,10 +206,10 @@ class PX2Diffractometer(GenericDiffractometer):
         self.chan_current_phase = self.get_channel_object("CurrentPhase")
         self.connect(self.chan_current_phase, "update", self.current_phase_changed)
 
-        self.chan_fast_shutter_is_open = self.get_channel_object("FastShutterIsOpen")
-        self.chan_fast_shutter_is_open.connect_signal(
-            "update", self.fast_shutter_state_changed
-        )
+        # self.chan_fast_shutter_is_open = self.get_channel_object("FastShutterIsOpen")
+        # self.chan_fast_shutter_is_open.connect_signal(
+        # "update", self.fast_shutter_state_changed
+        # )
 
         self.chan_scintillator_position = self.get_channel_object(
             "ScintillatorPosition"
@@ -232,6 +275,40 @@ class PX2Diffractometer(GenericDiffractometer):
 
         # self.use_sc = self.get_property("use_sample_changer")
 
+    def get_camera_list(self):
+        camera_list = [ 
+            "auto",
+            "oav",
+            "cam14_quad",
+            "cam14_1",
+            "cam14_2",
+            "cam14_3",
+            "cam14_4",
+            "cam1",
+            "cam6",
+            "cam8",
+            "cam13",
+            "murko",
+        ]
+        return camera_list
+    
+    def get_current_camera(self):
+        current_camera = self.redis.get("mxcube_camera").decode()
+        return current_camera
+        
+    def set_current_camera(self, camera):
+        if camera != "auto":
+            self.redis.set("mxcube_camera", camera)
+        
+    def centring_motor_moved(self, pos, delta=1.0):
+        """ """
+        try:
+            if time.time() - self.centring_time > delta:
+                self.invalidate_centring()
+            self.emit_diffractometer_moved()
+        except TypeError:
+            logging.getLogger("HWR").exception(traceback.format_exc())
+
     def use_sample_changer(self):
         """
         Description:
@@ -242,7 +319,7 @@ class PX2Diffractometer(GenericDiffractometer):
         self.beam_position = value
 
     def state_changed(self, state):
-        # self.log.debug("State changed: %s" % str(state))
+        # logging.getLogger("HWR").debug("State changed: %s" % str(state))
         if self.current_state != state:
             self.current_state = state
             self.emit("minidiffStateChanged", (self.current_state))
@@ -272,19 +349,24 @@ class PX2Diffractometer(GenericDiffractometer):
                 self.beam_position[0] - self.zoom_centre["x"]
             ) * self.omega_reference_par[
                 "direction"
-            ] / self.pixels_per_mm_x + self.omega_reference_par["position"]
+            ] / self.pixels_per_mm_x + self.omega_reference_par[
+                "position"
+            ]
         else:
             on_beam = (
                 self.beam_position[1] - self.zoom_centre["y"]
             ) * self.omega_reference_par[
                 "direction"
-            ] / self.pixels_per_mm_y + self.omega_reference_par["position"]
+            ] / self.pixels_per_mm_y + self.omega_reference_par[
+                "position"
+            ]
         self.centring_hwobj.appendMotorConstraint(self.omega_reference_motor, on_beam)
 
     def omega_reference_motor_moved(self, pos):
         """
         Descript. :
         """
+        self.update_pixels_per_mm()
         if self.omega_reference_par["camera_axis"].lower() == "x":
             pos = (
                 self.omega_reference_par["direction"]
@@ -378,6 +460,7 @@ class PX2Diffractometer(GenericDiffractometer):
         """
         Descript. :
         """
+        logging.debug("update_pixels_per_mm called")
         if self.chan_calib_x:
             self.pixels_per_mm_x = 1.0 / self.chan_calib_x.get_value()
             self.pixels_per_mm_y = 1.0 / self.chan_calib_y.get_value()
@@ -385,7 +468,7 @@ class PX2Diffractometer(GenericDiffractometer):
                 "pixelsPerMmChanged", ((self.pixels_per_mm_x, self.pixels_per_mm_y),)
             )
 
-    def set_phase(self, phase, timeout=60):
+    def set_phase(self, phase, safe_distance=200, timeout=60):
         """Sets diffractometer to the selected phase.
         In the plate mode before going to or away from
         Transfer or Beam location phase if needed then detector
@@ -398,20 +481,20 @@ class PX2Diffractometer(GenericDiffractometer):
 
         if phase in (
             GenericDiffractometer.PHASE_TRANSFER,
-            GenericDiffractometer.PHASE_BEAM,
+            # GenericDiffractometer.PHASE_BEAM,
         ) or self.current_phase in (
             GenericDiffractometer.PHASE_TRANSFER,
-            GenericDiffractometer.PHASE_BEAM,
+            # GenericDiffractometer.PHASE_BEAM,
         ):
             detector_distance = HWR.beamline.detector.distance.get_value()
-            self.log.debug(
+            logging.getLogger("HWR").debug(
                 "Diffractometer current phase: %s " % self.current_phase
                 + "selected phase: %s " % phase
                 + "detector distance: %d mm" % detector_distance
             )
-            if detector_distance < 350:
+            if detector_distance < safe_distance:
                 logging.getLogger("GUI").info("Moving detector to safe distance")
-                HWR.beamline.detector.distance.set_value(350)
+                HWR.beamline.detector.distance.set_value(safe_distance)
                 self.detector.insert_protective_cover()
 
         if timeout is not None:
@@ -443,6 +526,7 @@ class PX2Diffractometer(GenericDiffractometer):
         """
         Descript. :
         """
+        start = time.time()
         try:
             motor_pos = centring_procedure.get()
             # if isinstance(motor_pos, gevent.GreenletExit):
@@ -454,6 +538,7 @@ class PX2Diffractometer(GenericDiffractometer):
         else:
             self.emit_progress_message("Moving sample to centred position...")
             self.emit_centring_moving()
+            s_move = time.time()
             try:
                 self.move_to_motors_positions(motor_pos)
             except Exception:
@@ -478,25 +563,69 @@ class PX2Diffractometer(GenericDiffractometer):
                             and target values.
         :type motors_dict: dict
         """
+        self.log.info(
+            "move_motors motor_positions %s type(motor_positions) %s"
+            % (motor_positions, type(motor_positions))
+        )
+        try:
+            position = self.translate_from_mxcube_to_md(motor_positions)
+            self.goniometer.set_position(position)
+        except:
+            pass
 
-        position = self.translate_from_mxcube_to_md2(motor_positions)
+    def save_click(
+        self,
+        x,
+        y,
+        name_pattern=None,
+        directory=None,
+        directory_template="%s/manual_optical_alignment",
+    ):
+        
+        #fmt_time = time.asctime(time.localtime(timestamp)).replace(" ", "_").replace(":", ""),
+        timestamp = time.time()
+        fmt_time = get_string_from_timestamp(timestamp)
+        if name_pattern is None:
+            try:
+                element = self.get_element()
+            except:
+                element = ""
+            name_pattern = f"double_click_{element:s}{fmt_time:s}"
+            
+        if directory is None:
+            try:
+                directory = "%s/opti" % HWR.beamline.session.get_archive_directory()
+            except:
+                directory = directory_template % os.getenv("HOME")
+            
+        save_click_command = "click_saver.py -x %.2f -y %.2f -d %s -n %s -t %.3f &" % (
+            x,
+            y,
+            directory,
+            name_pattern,
+            timestamp,
+        )
 
-        self.goniometer.set_position(position, timeout=timeout)
+        self.log.info("save_click_command: %s" % save_click_command)
+        os.system(save_click_command)
 
-    def get_centred_point_from_coord(self, x, y, return_by_names=None):
+    def get_centred_point_from_coord(self, x, y, return_by_names=None, save=True):
         """
         Descript. :
         """
 
-        self.log.info("get_centred_point_from_coord: x, y: %s %s" % (x, y))
+        self.log.info("get_centered_point_from_coord: x, y: %s %s" % (x, y))
         self.log.info(
-            "get_centred_point_from_coord: self.pixels_per_mm_x, self.pixels_per_mm_ y: %s %s"
+            "get_centered_point_from_coord: self.pixels_per_mm_x, self.pixels_per_mm_ y: %s %s"
             % (self.pixels_per_mm_x, self.pixels_per_mm_y)
         )
         self.log.info(
-            "get_centred_point_from_coord: self.beam_position: %s"
+            "get_centered_point_from_coord: self.beam_position: %s"
             % str(self.beam_position)
         )
+
+        if save:
+            self.save_click(x, y)
 
         current_position = self.goniometer.get_aligned_position()
 
@@ -508,64 +637,63 @@ class PX2Diffractometer(GenericDiffractometer):
 
         horizontal_shift = x - self.beam_position[0]
 
+        calibration = self.camera.get_calibration()
+        self.pixels_per_mm_y, self.pixels_per_mm_x = 1.0 / calibration
+
         vertical_shift /= self.pixels_per_mm_y
         horizontal_shift /= self.pixels_per_mm_x
 
         self.log.info(
-            "get_centred_point_from_coord: original_vertical_shift: %s "
+            "get_centered_point_from_coord: original_vertical_shift: %s "
             % vertical_shift
         )
 
-        vertical_shift += alignmentz_shift
+        # vertical_shift += alignmentz_shift
+        horizontal_shift -= alignmentz_shift
+
+        self.log.info(f"p: {current_position}")
+        self.log.info(f"h: {horizontal_shift}")
+        self.log.info(f"v: {vertical_shift}")
+        self.log.info(f"omega: {current_position['Omega']}")
+
+        self.log.info(
+            f"executing centringx_shift, centringy_shift = self.goniometer.get_x_and_y(0, {horizontal_shift}, {current_position['Omega']})"
+        )
 
         centringx_shift, centringy_shift = self.goniometer.get_x_and_y(
-            0, vertical_shift, current_position["Omega"]
+            0, horizontal_shift, current_position["Omega"]
         )
 
-        centred_point = copy.deepcopy(current_position)
+        centered_point = copy.deepcopy(current_position)
 
-        self.log.info(
-            "get_centred_point_from_coord: alignmentz_shift: %s " % alignmentz_shift
-        )
-        self.log.info(
-            "get_centred_point_from_coord: horizontal_shift: %s " % horizontal_shift
-        )
+        self.log.info(f"cx_shift: {centringx_shift}")
+        self.log.info(f"cy_shift: {centringy_shift}")
 
-        self.log.info(
-            "get_centred_point_from_coord: vertical_shift: %s " % vertical_shift
-        )
-        self.log.info(
-            "get_centred_point_from_coord: centringx_shift: %s " % centringx_shift
-        )
-        self.log.info(
-            "get_centred_point_from_coord: centringy_shift: %s " % centringy_shift
-        )
+        centered_point["AlignmentZ"] -= alignmentz_shift
+        centered_point["AlignmentY"] += vertical_shift
 
-        centred_point["AlignmentZ"] -= alignmentz_shift
-        centred_point["AlignmentY"] -= horizontal_shift
+        centered_point["CentringX"] -= centringx_shift
+        centered_point["CentringY"] += centringy_shift
 
-        centred_point["CentringX"] += centringx_shift
-        centred_point["CentringY"] += centringy_shift
+        # centered_point['Omega'] += 90.
+        pos = self.translate_from_md_to_mxcube(centered_point)
 
-        # centred_point['Omega'] += 90.
-        pos = self.translate_from_md2_to_mxcube(centred_point)
-
-        self.log.info("get_centred_point_from_coord: centred_point: %s " % str(pos))
+        self.log.info("get_centered_point_from_coord: centered_point: %s " % str(pos))
 
         return pos
 
-        self.centring_hwobj.initCentringProcedure()
-        self.centring_hwobj.appendCentringDataPoint(
-            {
-                "X": (x - self.beam_position[0]) / self.pixels_per_mm_x,
-                "Y": (y - self.beam_position[1]) / self.pixels_per_mm_y,
-            }
-        )
-        self.omega_reference_add_constraint()
-        pos = self.centring_hwobj.centeredPosition()
-        self.log.info("get_centred_point_from_coord: pos %s" % str(pos))
-        if return_by_names:
-            pos = self.convert_from_obj_to_name(pos)
+        # self.centring_hwobj.initCentringProcedure()
+        # self.centring_hwobj.appendCentringDataPoint(
+        # {
+        # "X": (x - self.beam_position[0]) / self.pixels_per_mm_x,
+        # "Y": (y - self.beam_position[1]) / self.pixels_per_mm_y,
+        # }
+        # )
+        # self.omega_reference_add_constraint()
+        # pos = self.centring_hwobj.centeredPosition()
+        # self.log.info("get_centered_point_from_coord: pos %s" % str(pos))
+        # if return_by_names:
+        # pos = self.convert_from_obj_to_name(pos)
         return pos
 
     def move_to_beam(self, x, y, omega=None):
@@ -575,19 +703,37 @@ class PX2Diffractometer(GenericDiffractometer):
                 self, x, y, omega=self.goniometer.get_omega_position()
             )
         else:
-            self.log.debug(
+            logging.getLogger("HWR").debug(
                 "Diffractometer: Move to screen"
                 + " position disabled in BeamLocation phase."
             )
 
+    def get_element(self):
+        element = "manually_mounted"
+        try:
+            if self.goniometer.sample_is_loaded():
+                # element = HWR.sample_changer.cats_api.get_mounted_puck_and_sample()
+                element = HWR.beamline.sample_changer.get_loaded_sample_address()
+        except:
+            logging.exception(traceback.format_exc())
+
+        return element
+
     def manual_centring(
         self,
         n_clicks=3,
-        alignmenty_direction=-1.0,
-        alignmentz_direction=1.0,
-        centringx_direction=-1.0,
-        centringy_direction=1.0,
+        # alignmenty_direction=-1.0, # MD2
+        alignmenty_direction=+1.0,  # MD3 up
+        # alignmentz_direction=-1.0, # MD2
+        alignmentz_direction=-1.0,  # MD3 up
+        # centringx_direction=-1.0, # MD2
+        centringx_direction=+1.0,  # MD3 up
+        centringy_direction=+1.0,  # MD3 up & MD2
         refractive_model=False,
+        orientation="vertical",
+        use_frontlight=False,
+        use_backlight=True,
+        save=True,
     ):
         """
         Descript. :
@@ -595,8 +741,12 @@ class PX2Diffractometer(GenericDiffractometer):
         logging.getLogger("user_level_log").info("starting manual centring")
         _start = time.time()
         result_position = {}
-        self.goniometer.insert_backlight()
-        self.goniometer.extract_frontlight()
+        if use_backlight:
+            self.goniometer.insert_backlight()
+        if use_frontlight:
+            self.goniometer.insert_frontlight()
+        else:
+            self.goniometer.extract_frontlight()
 
         reference_position = self.goniometer.get_aligned_position()
 
@@ -622,20 +772,40 @@ class PX2Diffractometer(GenericDiffractometer):
             step = 360.0 / (n_clicks)
 
         logging.getLogger("user_level_log").info("default centring step %.2f" % (step))
+        # "autocenter_%s_%s_%s" % (os.getuid(), element, time.asctime().replace(' ', '_'))
+        element = self.get_element()
+        name_pattern = "manu_%s_%s" % (
+            element,
+            time.asctime().replace(" ", "_").replace(":", ""),
+        )
 
-        start_clicks = time.time()
+        try:
+            directory = "%s/opti" % HWR.beamline.session.get_archive_directory()
+        except:
+            directory = "%s/manual_optical_alignment" % os.getenv("HOME")
+
+        self.oa.timestamp = time.time()
+        self.oa.name_pattern = name_pattern
+        self.oa.directory = directory
+        self.oa.start_run_time = time.time()
+        self.oa.innermost_start_time = time.time()
 
         for k in range(n_clicks):
             self.user_clicked_event = gevent.event.AsyncResult()
             x, y = self.user_clicked_event.get()
-            image = HWR.beamline.sample_view.camera.get_last_image()
             calibration = self.camera.get_calibration()
+            self.pixels_per_mm_y, self.pixels_per_mm_x = 1.0 / calibration
             omega = self.goniometer.get_omega_position()
-
+            if save:
+                self.save_click(
+                    x,
+                    y,
+                    name_pattern=f"{name_pattern}_click_{k+1}_omega_{omega:.2f}",
+                    directory=directory,
+                )
             vertical_clicks.append(y)
             horizontal_clicks.append(x)
             omegas.append(omega)
-            images.append(image)
             calibrations.append([calibration])
 
             x -= self.beam_position[0]
@@ -645,45 +815,32 @@ class PX2Diffractometer(GenericDiffractometer):
             vertical_discplacements.append(y)
             horizontal_displacements.append(x)
 
-            self.log.info("click %d %f %f %f" % (k + 1, omega, x, y))
+            logging.getLogger("HWR").info("click %d %f %f %f" % (k + 1, omega, x, y))
 
             if k <= n_clicks:
-                self.goniometer.set_position({"Omega": omega + step})
+                self.move_omega_relative(step)
 
-        end_clicks = time.time()
+        self.oa.innermost_end_time = time.time()
+        self.oa.end_run_time = time.time()
+        self.oa.vertical_clicks = vertical_clicks
+        self.oa.horizontal_clicks = horizontal_clicks
+        self.oa.omega_clicks = omegas
 
-        name_pattern = "%s_%s" % (os.getuid(), time.asctime().replace(" ", "_"))
-        directory = "%s/manual_optical_alignment" % os.getenv("HOME")
-
-        save_history_command = "history_saver.py -s %.2f -e %.2f -d %s -n %s &" % (
-            start_clicks,
-            end_clicks,
-            directory,
-            name_pattern,
-        )
-
-        self.log.info("save_history_command: %s" % save_history_command)
-        os.system(save_history_command)
-
-        vertical_discplacements = np.array(vertical_discplacements) * 1.0e3
+        if orientation == "horizontal":
+            discplacements_perpendicular_to_omega = (
+                np.array(vertical_discplacements) * 1.0e3
+            )
+        elif orientation == "vertical":
+            discplacements_perpendicular_to_omega = (
+                np.array(horizontal_displacements) * 1.0e3
+            )
 
         angles = np.radians(omegas)
 
-        if self.centring_method != CENTRING_METHOD.REFRACTIVE:
-            initial_parameters = [4.0, 25.0, 0.05]
-            fit_y = minimize(
-                self.circle_model_residual,
-                initial_parameters,
-                method="nelder-mead",
-                args=(angles, vertical_discplacements),
-            )
-
-            c, r, alpha = fit_y.x
-            c *= 1e-3
-            r *= 1.0e-3
-            v = {"c": c, "r": r, "alpha": alpha}
-
-        else:
+        if (
+            hasattr(self.centring_method, "REFRACTIVE")
+            and self.centring_method == CENTRING_METHOD.REFRACTIVE
+        ):
             initial_parameters = lmfit.Parameters()
             initial_parameters.add_many(
                 ("c", 0.0, True, -5e3, +5e3, None, None),
@@ -695,14 +852,14 @@ class PX2Diffractometer(GenericDiffractometer):
                 ("beta", 0.0, True, -2 * np.pi, +2 * np.pi, None, None),
             )
 
-            fit_y = lmfit.minimize(
+            fit_projection = lmfit.minimize(
                 self.refractive_model_residual,
                 initial_parameters,
                 method="nelder",
-                args=(angles, vertical_discplacements),
+                args=(angles, discplacements_perpendicular_to_omega),
             )
-            self.log.info(fit_report(fit_y))
-            optimal_params = fit_y.params
+            self.log.info(fit_report(fit_projection))
+            optimal_params = fit_projection.params
             v = optimal_params.valuesdict()
             c = v["c"]
             r = v["r"]
@@ -716,12 +873,31 @@ class PX2Diffractometer(GenericDiffractometer):
             r *= 1.0e-3
             front *= 1.0e-3
             back *= 1.0e-3
+        else:
+            initial_parameters = [4.0, 25.0, 0.05]
+            fit_projection = minimize(
+                self.circle_model_residual,
+                initial_parameters,
+                method="nelder-mead",
+                args=(angles, discplacements_perpendicular_to_omega),
+            )
 
-        horizontal_center = np.mean(horizontal_displacements)
+            c, r, alpha = fit_projection.x
+            c *= 1e-3
+            r *= 1.0e-3
+            v = {"c": c, "r": r, "alpha": alpha}
+
+        if orientation == "horizontal":
+            displacements_along_omega = horizontal_displacements
+        elif orientation == "vertical":
+            displacements_along_omega = vertical_discplacements
+
+        center_along_omega = np.mean(displacements_along_omega)
 
         d_sampx = centringx_direction * r * np.sin(alpha)
         d_sampy = centringy_direction * r * np.cos(alpha)
-        d_y = alignmenty_direction * horizontal_center
+
+        d_y = alignmenty_direction * center_along_omega
         d_z = alignmentz_direction * c
 
         move_vector_dictionary = {
@@ -736,6 +912,9 @@ class PX2Diffractometer(GenericDiffractometer):
             if motor in move_vector_dictionary:
                 result_position[motor] += move_vector_dictionary[motor]
 
+        self.goniometer.set_position(result_position)
+        self.oa.conclusion_end_time = time.time()
+        self.oa.clean()
         _end = time.time()
         duration = _end - _start
         self.log.info(
@@ -756,35 +935,48 @@ class PX2Diffractometer(GenericDiffractometer):
             "vertical_optimal_parameters": v,
         }
 
-        template = os.path.join(directory, name_pattern)
-
-        if not os.path.isdir(directory):
-            os.makedirs(directory)
-
-        images_filename = "%s_images.h5" % template
-        images_file = h5py.File(images_filename, "w")
-        images_file.create_dataset(
-            "images", data=np.array(images), compression="lzf", dtype=np.uint8
-        )
-        images_file.close()
-
-        clicks_filename = "%s_clicks.pickle" % template
-        f = open(clicks_filename, "w")
-        pickle.dump(results, f)
-        f.close()
-
         self.log.info(
             "manual_centring finished in %.3f seconds" % (time.time() - _start)
         )
 
-        translated_position = self.translate_from_md2_to_mxcube(result_position)
+        if save:
+            try:
+                if not os.path.isdir(directory):
+                    os.makedirs(directory)
+
+                template = os.path.join(directory, name_pattern)
+
+                clicks_filename = "%s_clicks.pickle" % template
+                f = open(clicks_filename, "wb")
+                pickle.dump(results, f)
+                f.close()
+
+                images_filename = "%s_images.h5" % template
+                images_file = h5py.File(images_filename, "w")
+
+                jpegs = get_jpegs_from_arrays(images)
+                images_file.create_dataset(
+                    "images",
+                    data=jpegs,
+                    dtype=h5py.special_dtype(vlen=np.dtype("uint8")),
+                )
+                images_file.close()
+
+            except:
+                self.log.exception(traceback.format_exc())
+
+        # HWR.beamline.sample_view.accept_centring()
+        translated_position = self.translate_from_md_to_mxcube(result_position)
         return translated_position
 
-    def translate_from_md2_to_mxcube(self, position):
+    def translate_from_md_to_mxcube(self, position):
         translated_position = {}
 
         for key in position:
-            translated_position[self.md2_to_mxcube[key]] = position[key]
+            try:
+                translated_position[self.md_to_mxcube[key]] = position[key]
+            except KeyError:
+                pass
 
         return translated_position
 
@@ -796,13 +988,13 @@ class PX2Diffractometer(GenericDiffractometer):
 
         aligned_position = self.goniometer.get_aligned_position()
 
-        motors = self.translate_from_mxcube_to_md2(motor_pos)
+        motors = self.translate_from_mxcube_to_md(motor_pos)
 
         for key in aligned_position:
             if key not in motors:
                 motors[key] = aligned_position[key]
 
-        motors = self.translate_from_md2_to_mxcube(motors)
+        motors = self.translate_from_md_to_mxcube(motors)
         # motors = {}
         # for motor_role in self.centring_motors_list:
         # self.log.info('motor_role %s' % motor_role)
@@ -811,8 +1003,11 @@ class PX2Diffractometer(GenericDiffractometer):
         # motors[motor_role] = motor_pos[motor_obj]
         # except KeyError:
 
+        # self.log.exception('convert_from_obj_to_name %s' % traceback.format_exc())
         # if motor_obj:
         # motors[motor_role] = motor_obj.get_value()
+
+        self.update_pixels_per_mm()
 
         motors["beam_x"] = (
             self.beam_position[0] - self.zoom_centre["x"]
@@ -823,14 +1018,20 @@ class PX2Diffractometer(GenericDiffractometer):
         self.log.info("convert_from_obj_to_name motors %s" % str(motors))
         return motors
 
-    def translate_from_mxcube_to_md2(self, position):
+    def translate_from_mxcube_to_md(self, position):
+        # self.log.info('translate_from_mxcube_to_md position %s' % str(position))
         translated_position = {}
 
         for key in position:
             if isinstance(key, str):
-                translated_position[self.mxcube_to_md2[key]] = position[key]
+                try:
+                    translated_position[self.mxcube_to_md[key]] = position[key]
+                except:
+                    pass
+                    # self.log.exception(traceback.format_exc())
+
             else:
-                translated_position[key.motor_name] = position[key]
+                translated_position[key.actuator_name] = position[key]
         return translated_position
 
     def circle_model(self, angles, c, r, alpha):
@@ -898,74 +1099,77 @@ class PX2Diffractometer(GenericDiffractometer):
         """
         c = centred_positions_dict
 
-        # self.log.info('motor_positions_to_screen c %s ' % str(c))
+        self.update_pixels_per_mm()
+
+        centred_position = self.translate_from_mxcube_to_md(c)
+
+        y, x = self.goniometer.get_shift_from_aligned_position_and_reference_position(
+            centred_position
+        )
+
+        y = y * self.pixels_per_mm_y + self.zoom_centre["y"]
+        x = x * self.pixels_per_mm_x + self.zoom_centre["x"]
+
+        return int(x), int(y)
 
         # kappa = self.current_motor_positions["kappa"]
         # phi = self.current_motor_positions["kappa_phi"]
-        self.log.info("centred_positions_dict %s" % str(centred_positions_dict))
-        try:
-            for key in c:
-                if c[key] is None:
-                    try:
-                        c[key] = self.motor_hwobj_dict[key].get_value()
-                    except Exception:
-                        # self.log.info('motor_positions_to_screen exception key %s' % key)
-                        self.log.exception("")
+        # aligned_position = self.goniometer.get_aligned_position()
 
-            if "kappa" in c and c["kappa"] is None:
-                kappa = self.motor_hwobj_dict["kappa"].get_value()
-                c["kappa"] = kappa
-            else:
-                c["kappa"] = self.goniometer.get_kappa_position()
+        # self.log.info("centred_positions_dict %s" % str(centred_positions_dict))
+        # self.log.info('aligned_position_dict %s' % str(aligned_position))
+        # centred_positions_dict = self.translate_from_md_to_mxcube(aligned_position)
+        # self.log.info("translated centred_positions_dict %s" % str(centred_positions_dict))
 
-            if "kappa_phi" in c and c["kappa_phi"] is None:
-                phi = self.motor_hwobj_dict["kappa_phi"].get_value()
-                c["kappa_phi"] = phi
-            else:
-                c["kappa_phi"] = self.goniometer.get_phi_position()
+        # try:
+        # for key in c:
+        # if c[key] is None:
+        # try:
+        # c[key] = self.motor_hwobj_dict[key].get_value()
+        # except Exception:
+        # self.log.info('motor_positions_to_screen exception key %s' % key)
+        # self.log.info(traceback.format_exc())
 
-            if "beam_x" in c and c["beam_x"] in [0.0, None]:
-                c["beam_x"] = 0.0  # self.beam_position[0]
-            else:
-                c["beam_x"] = 0.0  # self.beam_position[0]
+        # if "kappa" in c and c["kappa"] is None:
+        # kappa = self.motor_hwobj_dict["kappa"].get_value()
+        # c["kappa"] = kappa
+        # else:
+        # c["kappa"] = self.goniometer.get_kappa_position()
 
-            if "beam_y" not in c and c["beam_y"] in [0.0, None]:
-                c["beam_y"] = 0.0  # self.beam_position[1]
-            else:
-                c["beam_y"] = 0.0  # self.beam_position[1]
+        # if "kappa_phi" in c and c["kappa_phi"] is None:
+        # phi = self.motor_hwobj_dict["kappa_phi"].get_value()
+        # c["kappa_phi"] = phi
+        # else:
+        # c["kappa_phi"] = self.goniometer.get_phi_position()
 
-            # self.log.info('motor_positions_to_screen c2 %s ' % str(c))
+        # c["beam_x"] = 0.
+        # c["beam_y"] = 0.
 
-            if (c["kappa"], c["kappa_phi"]) != (
-                self.goniometer.get_kappa_position(),
-                self.goniometer.get_phi_position(),
-            ) and self.minikappa_correction_hwobj is not None:
-                self.log.info("calculating minikappa correction")
-                (
-                    c["sampx"],
-                    c["sampy"],
-                    c["phiy"],
-                ) = self.minikappa_correction_hwobj.shift(
-                    c["kappa"],
-                    c["kappa_phi"],
-                    [c["sampx"], c["sampy"], c["phiy"]],
-                    c["kappa"],
-                    c["kappa_phi"],
-                )
+        # sanitized_centred_positions_dict = {}
+        # for key in c:
+        # if not np.isnan(c[key]):
+        # sanitized_centred_positions_dict[key] = c[key]
+        # else:
+        # sanitized_centred_positions_dict[key] = 0.
+        # c = sanitized_centred_positions_dict
+        ##self.log.debug('sanitized_centred_positions_dict %s' % str(sanitized_centred_positions_dict))
 
-            xy = self.centring_hwobj.centringToScreen(c)
-            # self.log.info('xy %s' % xy)
+        # xy = self.centring_hwobj.centringToScreen(c)
+        ##self.log.info('xy %s' % xy)
 
-            if xy:
-                x = (xy["X"] + c["beam_x"]) * self.pixels_per_mm_x + self.zoom_centre[
-                    "x"
-                ]
-                y = (xy["Y"] + c["beam_y"]) * self.pixels_per_mm_y + self.zoom_centre[
-                    "y"
-                ]
-                return x, y
-        except Exception:
-            return 0, 0
+        # if xy:
+        # x = (xy["X"] + c["beam_x"]) * self.pixels_per_mm_x + self.zoom_centre[
+        # "x"
+        # ]
+        # y = (xy["Y"] + c["beam_y"]) * self.pixels_per_mm_y + self.zoom_centre[
+        # "y"
+        # ]
+        ##self.log.info('x: %s, y: %s' % (x, y))
+        # return int(x), int(y)
+        # except Exception:
+        # self.log.info('motor_positions_to_screen exception key %s' % key)
+        # self.log.info(traceback.format_exc())
+        # return 0, 0
 
     def move_to_centred_position(self, centred_position):
         """
@@ -980,6 +1184,7 @@ class PX2Diffractometer(GenericDiffractometer):
         if centred_position.beam_y is None:
             centred_position.beam_y = 0.0
 
+        self.update_pixels_per_mm()
         if self.current_phase != "BeamLocation":
             try:
                 x, y = centred_position.beam_x, centred_position.beam_y
@@ -993,17 +1198,13 @@ class PX2Diffractometer(GenericDiffractometer):
                     self.motor_hwobj_dict["sampx"]: centred_position.sampx,
                     self.motor_hwobj_dict["sampy"]: centred_position.sampy,
                     self.motor_hwobj_dict["phi"]: centred_position.phi,
-                    self.motor_hwobj_dict["phiy"]: (
-                        centred_position.phiy
-                        + self.centring_hwobj.camera2alignmentMotor(
-                            self.motor_hwobj_dict["phiy"], {"X": dx, "Y": dy}
-                        )
+                    self.motor_hwobj_dict["phiy"]: centred_position.phiy
+                    + self.centring_hwobj.camera2alignmentMotor(
+                        self.motor_hwobj_dict["phiy"], {"X": dx, "Y": dy}
                     ),
-                    self.motor_hwobj_dict["phiz"]: (
-                        centred_position.phiz
-                        + self.centring_hwobj.camera2alignmentMotor(
-                            self.motor_hwobj_dict["phiz"], {"X": dx, "Y": dy}
-                        )
+                    self.motor_hwobj_dict["phiz"]: centred_position.phiz
+                    + self.centring_hwobj.camera2alignmentMotor(
+                        self.motor_hwobj_dict["phiz"], {"X": dx, "Y": dy}
                     ),
                     self.motor_hwobj_dict["kappa"]: centred_position.kappa,
                     self.motor_hwobj_dict["kappa_phi"]: centred_position.kappa_phi,
@@ -1012,7 +1213,9 @@ class PX2Diffractometer(GenericDiffractometer):
             except Exception:
                 logging.exception("Could not move to centred position")
         else:
-            self.log.debug("Move to centred position disabled in BeamLocation phase.")
+            logging.getLogger("HWR").debug(
+                "Move to centred position disabled in BeamLocation phase."
+            )
 
     def move_to_motors_positions(self, motors_positions, wait=False):
         """ """
@@ -1070,7 +1273,9 @@ class PX2Diffractometer(GenericDiffractometer):
         Descript. :
         """
         if self.in_plate_mode():
-            self.log.info("PX2Diffractometer: Visual align not available in Plate mode")
+            logging.getLogger("HWR").info(
+                "PX2Diffractometer: Visual align not available in Plate mode"
+            )
         else:
             t1 = [point_1.sampx, point_1.sampy, point_1.phiy]
             t2 = [point_2.sampx, point_2.sampy, point_2.phiy]
@@ -1085,16 +1290,15 @@ class PX2Diffractometer(GenericDiffractometer):
                     new_phiy,
                 ),
             ) = self.goniometer.get_align_vector(t1, t2, kappa, phi)
-            # self.minikappa_correction_hwobj.alignVector(t1,t2,kappa,phi)
-            self.move_to_motors_positions(
-                {
-                    self.motor_hwobj_dict["kappa"]: new_kappa,
-                    self.motor_hwobj_dict["kappa_phi"]: new_phi,
-                    self.motor_hwobj_dict["sampx"]: new_sampx,
-                    self.motor_hwobj_dict["sampy"]: new_sampy,
-                    self.motor_hwobj_dict["phiy"]: new_phiy,
-                }
-            )
+            new_position = {
+                self.motor_hwobj_dict["kappa"]: new_kappa,
+                self.motor_hwobj_dict["kappa_phi"]: new_phi,
+                self.motor_hwobj_dict["sampx"]: new_sampx,
+                self.motor_hwobj_dict["sampy"]: new_sampy,
+                self.motor_hwobj_dict["phiy"]: new_phiy,
+            }
+
+            self.move_to_motors_positions(new_position)
 
     def re_emit_values(self):
         """
@@ -1111,6 +1315,10 @@ class PX2Diffractometer(GenericDiffractometer):
         if self.chan_fast_shutter_is_open is not None:
             self.chan_fast_shutter_is_open.set_value(not self.fast_shutter_is_open)
 
+    def get_snapshot(self, shape=None):
+        if HWR.beamline.sample_view:
+            return HWR.beamline.sample_view.take_snapshot()
+
     def find_loop(self):
         """
         Description:
@@ -1124,7 +1332,8 @@ class PX2Diffractometer(GenericDiffractometer):
         """
         Description:
         """
-        self.motor_hwobj_dict["phi"].set_value_relative(relative_angle, 5)
+        self.goniometer.set_omega_relative_position(relative_angle)
+        # self.motor_hwobj_dict["phi"].set_value_relative(relative_angle, 5)
 
     def close_kappa(self):
         """
@@ -1134,14 +1343,14 @@ class PX2Diffractometer(GenericDiffractometer):
 
     def close_kappa_task(self):
         """Close kappa task"""
-        self.log.debug("Started closing Kappa")
+        logging.getLogger("HWR").debug("Started closing Kappa")
         self.move_kappa_and_phi_procedure(0, None)
         self.wait_device_ready(60)
         self.motor_hwobj_dict["kappa"].homeMotor()
         self.wait_device_ready(60)
         self.move_kappa_and_phi_procedure(0, None)
         self.wait_device_ready(60)
-        self.log.debug("Done closing Kappa")
+        logging.getLogger("HWR").debug("Done closing Kappa")
         # self.kappa_phi_motor_hwobj.homeMotor()
 
     def set_zoom(self, position):
@@ -1259,82 +1468,166 @@ class PX2Diffractometer(GenericDiffractometer):
         self.zoom_motor_hwobj.zoom_out()
 
     def save_centring_positions(self):
-        self.cmd_save_centring_positions()
+        self.goniometer.save_position()
+        # self.cmd_save_centring_positions()
 
     def beam_position_check(self):
-        logging.getLogger("user_level_log").info("Going to check the beam position")
-        self.bpc(wait=False)
+        # logging.getLogger("user_level_log").info("Going to check the beam position")
+        logging.getLogger("user_level_log").info(
+            "Beam position check desactivated, please talk to your beamline contact."
+        )
+        return
+        # self.bpc(wait=False)
 
     @task
     def bpc(self):
-        ba = beam_align.beam_align(
-            name_pattern="%s_%s" % (os.getuid(), time.asctime().replace(" ", "_")),
-            directory="%s/beam_align" % os.getenv("HOME"),
-        )
-        logging.getLogger("user_level_log").info(
-            "Align beam to the optical centre of the camera"
-        )
-        logging.getLogger("user_level_log").info(
-            "Moving scintillator to sample position, please wait ..."
-        )
-        ba.execute()
+        # log = logging.getLogger("user_level_log")
+        return
+        # ba = beam_align.beam_align(
+        # name_pattern="%s_%s" % (os.getuid(), time.asctime().replace(" ", "_")),
+        # directory="%s/beam_align" % os.getenv("HOME"),
+        # diagnostic=True)
+        # log.info(
+        # "Align beam to the optical centre of the camera"
+        # )
+        # log.info(
+        # "Moving scintillator to sample position, please wait ..."
+        # )
+        # ba.execute()
 
-        if ba.no_beam is False:
-            logging.getLogger("user_level_log").info(
-                "Initial mirror positions (vfm, hfm) [mrad]: %.4f %.4f"
-                % tuple(ba.initial_mirror_positions)
-            )
-            logging.getLogger("user_level_log").info(
-                "Initial pixel shift from center (vertical, horizontal): %.1f, %.1f"
-                % tuple(ba.initial_pixel_shift)
-            )
-            logging.getLogger("user_level_log").info(
-                "Beam position adjustment finished after %d iterations"
-                % ba.number_of_iterations
-            )
-            logging.getLogger("user_level_log").info(
-                "Final mirror positions (vfm, hfm) [mrad]: %.4f %.4f"
-                % tuple(ba.final_mirror_position)
-            )
-            logging.getLogger("user_level_log").info(
-                "Final pixel shift from center (vertical, horizontal): %.1f, %.1f"
-                % tuple(ba.final_pixel_shift)
-            )
-            logging.getLogger("user_level_log").info(
-                "Delta in motor positions [mrad]: %.4f, %.4f"
-                % tuple(ba.final_mirror_position - ba.initial_mirror_positions)
-            )
-        else:
-            logging.getLogger("user_level_log").info(ba.no_beam_message)
+        # if ba.no_beam is False:
+        # log.info(
+        # "Initial mirror positions (v, h) [mm]: %.4f %.4f"
+        # % tuple(ba.initial_mirror_positions)
+        # )
+        # log.info(
+        # "Initial error (v, h) [px]: %.1f, %.1f"
+        # % tuple(ba.initial_pixel_shift)
+        # )
+        # log.info(
+        # "Initial error (v, h) [um]: %.1f, %.1f"
+        # % tuple(ba.initial_pixel_shift_mm * 1000.)
+        # )
+        # log.info(
+        # "Final error (v, h) [px]: %.1f, %.1f"
+        # % tuple(ba.final_pixel_shift)
+        # )
+        # log.info(
+        # "Final error (v, h) [um]: %.1f, %.1f"
+        # % tuple(ba.final_pixel_shift_mm * 1000.)
+        # )
+        # log.info(
+        # "Delta in motor positions [um]: %.1f, %.1f"
+        # % tuple((ba.final_mirror_position - ba.initial_mirror_positions) * 1000)
+        # )
+        # log.info(
+        # "Final mirror positions [mm]: %.4f %.4f"
+        # % tuple(ba.final_mirror_position)
+        # )
+        # else:
+        # log.info(ba.no_beam_message)
 
     @task
     def anneal(self, time=1.0):
         anneal_procedure(time)
 
     @task
+    def show_excenter_finished_dialog(self, scan_length=0.1, step=90.0, parent=None):
+        if parent is not None:
+            qt_import.QMessageBox.warning(
+                parent,
+                "Success!",
+                "Sample moved to optimal position\nplease, proceed with data collection.",
+                qt_import.QMessageBox.Ok,
+            )
+
+    @task
     def excenter(
         self,
-        scan_length=0.1,
-        step=90.0,
-        start=0.0,
-        base_directory="/nfs/ruche/proxima2a-spool/2019_Run1/excenter",
+        scan_length=0.25,
+        step=45.0,
+        dozor=True,
+        colspot=False,
+        along=False,
+        interleave=True,
+        default_directory="/nfs/data2/excenter",
         name_pattern="excenter",
+        parent=None,
     ):
-        directory = os.path.join(base_directory, datetime.datetime.today().isoformat())
+        
+        #fmt_time = time.asctime(time.localtime(timestamp)).replace(" ", "_").replace(":", ""),
+        timestamp = time.time()
+        fmt_time = get_string_from_timestamp(timestamp)
+        try:
+            element = self.get_element()
+        except:
+            element = ""
+            
+        try:
+            directory = "%s/tomo" % HWR.beamline.session.get_archive_directory()
+        except:
+            directory = default_directory
+                
+        directory = os.path.join(directory, f"{element:s}_{fmt_time:s}")
 
-        angles = str(tuple(np.arange(start, 360.0, step)))
+        # angles = str(tuple(np.arange(start, 360.0, step)))
+        # angles = np.array([0, 90, 180, 270]) # for high pressure measurements
+        # angles = np.array((0, 45, 90, 135, 180)) # GPhL choice
+        # angles = np.array([0, 90, 180, 225, 315])  # 360 deg version of GPhL choice
+        angles = np.arange(0, 180, step)
+        if interleave:
+            angles[1::2] = angles[1::2] + 180
+            angles.sort()
+        
+        current_omega_position = self.goniometer.get_omega_position()
+        angles = angles + current_omega_position
+        angles = str(list(angles))
 
-        execute_line = 'excenter.py -d %s -n %s -l %.2f -a "%s" &' % (
-            directory,
-            name_pattern,
-            scan_length,
-            angles,
+        if colspot:
+            method = "xds"
+        else:
+            method = "tioga"
+            
+        experiment = diffraction_tomography(
+            directory=directory,
+            name_pattern=name_pattern,
+            vertical_range=scan_length,
+            scan_start_angles=angles,
+            method=method,
+        )
+
+        experiment.execute()
+
+        # execute_line = '/usr/local/experimental_methods/diffraction_tomography.py -d %s -n %s -y %.2f -a "%s" -A -C -D &' % (
+        # directory,
+        # name_pattern,
+        # scan_length,
+        # angles,
+        # )
+        
+        execute_line = (
+            f"/usr/local/conda/envs/murko_3.11/bin/python /usr/local/experimental_methods/shape_from_diffraction_tomography.py -d {directory} -n {name_pattern} -M {method} -D &"
         )
 
         self.log.info("excenter angles %s" % angles)
         self.log.info("excenter line %s" % execute_line)
 
         os.system(execute_line)
+        logging.getLogger("user_level_log").info("X-ray centring finished successfully")
+        logging.getLogger("user_level_log").info("Sample moved to optimal position")
+        logging.getLogger("user_level_log").info("You may proceed with data collection")
+        if parent is not None:
+            qt_import.QMessageBox.warning(
+                parent,
+                "Success!",
+                "X-ray centring finished successfully\nSample moved to optimal position.\nYou may proceed with data collection",
+                qt_import.QMessageBox.Ok,
+            )
+
+        result_position = experiment.get_result_position()
+        translated_position = self.translate_from_md_to_mxcube(result_position)
+        HWR.beamline.sample_view.accept_centring()
+        return translated_position
 
     def aperture_align(self):
         logging.getLogger("user_level_log").info("Aligning the current aperture")
@@ -1345,7 +1638,7 @@ class PX2Diffractometer(GenericDiffractometer):
         logging.getLogger("user_level_log").info(
             "Adjusting camera exposure time for visualisation on the scintillator"
         )
-        a = scan_and_align.scan_and_align("aperture", display=False)
+        a = scan_and_align("aperture", display=False)
         logging.getLogger("user_level_log").info("Scanning the aperture")
         a.scan()
         a.align(optimum="com")
@@ -1373,7 +1666,7 @@ class PX2Diffractometer(GenericDiffractometer):
     # @task
     def optical_alignment(self):
         start = time.time()
-        oa = optical_alignment.optical_alignment(
+        oa = optical_alignment(
             name_pattern="%s_%s" % (os.getuid(), time.asctime().replace(" ", "_")),
             directory="%s/automated_optical_alignment" % os.getenv("HOME"),
             analysis=True,
@@ -1390,7 +1683,7 @@ class PX2Diffractometer(GenericDiffractometer):
         # self.emit_centring_successful()
         self.emit("centringSuccessful", self.current_centring_method, ())
         result_position = oa.get_result_position()
-        translated_position = self.translate_from_md2_to_mxcube(result_position)
+        translated_position = self.translate_from_md_to_mxcube(result_position)
         return translated_position
 
     def set_nclicks(self, nclicks):
@@ -1400,14 +1693,14 @@ class PX2Diffractometer(GenericDiffractometer):
         try:
             self.nclicks = int(nclicks)
         except Exception:
-            self.log.exception("")
+            logging.getLogger("HWR").exception(traceback.format_exc())
 
     def set_step(self, step):
         self.log.info("PX2Diffractometer: centring step changed: %s" % step)
         try:
             self.step = float(step)
         except Exception:
-            self.log.exception("")
+            logging.getLogger("HWR").exception(traceback.format_exc())
 
     def set_centring_method(self, centring_method):
         self.log.info(
@@ -1416,7 +1709,7 @@ class PX2Diffractometer(GenericDiffractometer):
         try:
             self.centring_method = centring_method
         except Exception:
-            self.log.exception("")
+            logging.getLogger("HWR").exception(traceback.format_exc())
 
     def is_ready(self):
         """
@@ -1434,3 +1727,28 @@ class PX2Diffractometer(GenericDiffractometer):
 
     def set_collecting(self, collecting=True):
         self.collecting = collecting
+
+    def align_from_single_image(self, n_views=2):
+        self.log.info("align_from_single_image, total number of views %d" % n_views)
+        for k in range(n_views):
+            self.log.info("align_from_single_image, view %d" % k)
+            self.camera.align_from_single_image(generate_report=False)
+
+    def get_positions(self):
+        self.update_pixels_per_mm()
+        positions = self.goniometer.get_aligned_position()
+        self.current_motor_positions = self.translate_from_md_to_mxcube(positions)
+        self.current_motor_positions["beam_x"] = (
+            self.beam_position[0] - self.zoom_centre["x"]
+        ) / self.pixels_per_mm_y
+        self.current_motor_positions["beam_y"] = (
+            self.beam_position[1] - self.zoom_centre["y"]
+        ) / self.pixels_per_mm_x
+        return self.current_motor_positions
+
+    def has_kappa(self):
+        return self.goniometer.has_kappa()
+
+    def accept_centring(self):
+        super().accept_centring()
+        self.goniometer.save_position()

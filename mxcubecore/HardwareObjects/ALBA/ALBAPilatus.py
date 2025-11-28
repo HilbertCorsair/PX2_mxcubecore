@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -18,13 +18,15 @@
 #  along with MXCuBE. If not, see <http://www.gnu.org/licenses/>.
 
 from __future__ import print_function
-
+import logging
 import time
 
-from PyTango.gevent import DeviceProxy
-
+from mxcubecore.HardwareObjects.abstract.AbstractDetector import (
+    AbstractDetector,
+)
 from mxcubecore.BaseHardwareObjects import HardwareObject
-from mxcubecore.HardwareObjects.abstract.AbstractDetector import AbstractDetector
+
+from PyTango.gevent import DeviceProxy
 
 __author__ = "Vicente Rey"
 __credits__ = ["ALBA"]
@@ -34,9 +36,9 @@ __category__ = "General"
 
 class ALBAPilatus(AbstractDetector, HardwareObject):
     """Detector class. Contains all information about detector
-    - states are 'OK', and 'BAD'
-    - status is busy, exposing, ready, etc.
-    - physical property is RH for pilatus, P for rayonix
+       - states are 'OK', and 'BAD'
+       - status is busy, exposing, ready, etc.
+       - physical property is RH for pilatus, P for rayonix
     """
 
     def __init__(self, name):
@@ -63,7 +65,7 @@ class ALBAPilatus(AbstractDetector, HardwareObject):
             self.latency_time = None
 
         if self.latency_time is None:
-            self.log.debug(
+            logging.getLogger("HWR").debug(
                 "Cannot obtain latency time from Pilatus XML. Using %s"
                 % self.default_latency_time
             )
@@ -102,16 +104,13 @@ class ALBAPilatus(AbstractDetector, HardwareObject):
 
     def get_beam_position(self, distance=None, wavelength=None):
         """Returns beam center coordinates"""
-
-        # NBNB TODO check if pixels or mm, and adjust code
-        # Should be pixels
         beam_x = 0
         beam_y = 0
         try:
             beam_x = self.beamx_chan.get_value()
             beam_y = self.beamy_chan.get_value()
         except Exception:
-            self.log.exception("")
+            pass
         return beam_x, beam_y
 
     def get_manufacturer(self):
@@ -160,7 +159,7 @@ class ALBAPilatus(AbstractDetector, HardwareObject):
         kev_diff = abs(det_energy - currentenergy)
 
         if kev_diff > 1.2:
-            self.log.debug(
+            logging.getLogger("HWR").debug(
                 "programming energy_threshold on pilatus to: %s" % currentenergy
             )
             # if self.wait_standby():
@@ -179,6 +178,7 @@ class ALBAPilatus(AbstractDetector, HardwareObject):
         return True
 
     def prepare_acquisition(self, dcpars):
+
         self.set_energy_threshold()
         # self.wait_standby()
 
@@ -196,17 +196,19 @@ class ALBAPilatus(AbstractDetector, HardwareObject):
         trig_mode = "EXTERNAL_TRIGGER"
         # latency_time = 0.003
 
-        self.log.debug(
+        logging.getLogger("HWR").debug(
             " Preparing detector (dev=%s) for data collection" % self.devname
         )
 
-        self.log.debug("    /saving directory: %s" % basedir)
-        self.log.debug("    /prefix          : %s" % prefix)
-        self.log.debug("    /saving_format   : %s" % fileformat)
-        self.log.debug("    /trigger_mode    : %s" % trig_mode)
-        self.log.debug("    /acq_nb_frames   : %s" % nb_frames)
-        self.log.debug("    /acq_expo_time   : %s" % str(exp_time - self.latency_time))
-        self.log.debug("    /latency_time    : %s" % self.latency_time)
+        logging.getLogger("HWR").debug("    /saving directory: %s" % basedir)
+        logging.getLogger("HWR").debug("    /prefix          : %s" % prefix)
+        logging.getLogger("HWR").debug("    /saving_format   : %s" % fileformat)
+        logging.getLogger("HWR").debug("    /trigger_mode    : %s" % trig_mode)
+        logging.getLogger("HWR").debug("    /acq_nb_frames   : %s" % nb_frames)
+        logging.getLogger("HWR").debug(
+            "    /acq_expo_time   : %s" % str(exp_time - self.latency_time)
+        )
+        logging.getLogger("HWR").debug("    /latency_time    : %s" % self.latency_time)
 
         self.device.write_attribute("saving_mode", "AUTO_FRAME")
         self.device.write_attribute("saving_directory", basedir)
@@ -231,7 +233,7 @@ class ALBAPilatus(AbstractDetector, HardwareObject):
         return True
 
     def prepare_collection(self, nb_frames, first_img_no):
-        self.log.debug(
+        logging.getLogger("HWR").debug(
             "ALBAPilatus. preparing collection. nb_images: %s, first_no: %s"
             % (nb_frames, first_img_no)
         )
@@ -247,16 +249,17 @@ class ALBAPilatus(AbstractDetector, HardwareObject):
         self.stop_acquisition()
 
     def set_image_headers(self, image_headers, angle_info):
+
         nb_images = image_headers["nb_images"]
         angle_inc = image_headers["Angle_increment"]
         start_angle = image_headers["Start_angle"]
 
-        startangles_list = []
+        startangles_list = list()
         ang_start, ang_inc, spacing = angle_info
         for i in range(nb_images):
             startangles_list.append("%0.4f deg." % (ang_start + spacing * i))
 
-        headers = []
+        headers = list()
         for i, sa in enumerate(startangles_list):
             header = (
                 "_array_data.header_convention PILATUS_1.2\n"

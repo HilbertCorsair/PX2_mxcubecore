@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -21,20 +21,19 @@
 #  https://www.python.org/dev/peps/pep-0008/
 
 """
-Handles interaction with the data model(s). Adding, removing and
-retrieving nodes are all done via this object. It is possible to
+Handels interaction with the data model(s). Adding, removing and
+retreiving nodes are all done via this object. It is possbile to
 handle several models by using register_model and select_model.
 """
 
+import os
 import json
 import logging
-
 import jsonpickle
 
-from mxcubecore import HardwareRepository as HWR
-from mxcubecore import queue_entry
 from mxcubecore.BaseHardwareObjects import HardwareObject
-from mxcubecore.model import queue_model_objects
+from mxcubecore.HardwareObjects import queue_entry, queue_model_objects
+from mxcubecore import HardwareRepository as HWR
 
 
 class Serializer(object):
@@ -76,7 +75,7 @@ class QueueModel(HardwareObject):
         Framework-2 method, inherited from HardwareObject and called
         by the framework after the object has been initialized.
 
-        You should normally not need to call this method.
+        You should normaly not need to call this method.
         """
         pass
 
@@ -150,7 +149,7 @@ class QueueModel(HardwareObject):
         Adds the child node <child>. Raises the exception TypeError
         if child is not of type TaskNode.
 
-        Moves the child (re-parents it) if it already has a parent.
+        Moves the child (reparents it) if it already has a parent.
 
         :param child: TaskNode to add
         :type child: TaskNode
@@ -319,7 +318,7 @@ class QueueModel(HardwareObject):
 
     def get_path_templates(self):
         """
-        Retrieves a list of all the path templates in the model.
+        Retrievies a list of all the path templates in the model.
         """
         return self._get_path_templates_rec(self.get_model_root())
 
@@ -361,7 +360,7 @@ class QueueModel(HardwareObject):
 
     def copy_node(self, node):
         """
-        Copies the node <node> and returns it.
+        Copys the node <node> and returns it.
 
         :param node: The node to copy.
         :type node: TaskModel
@@ -422,11 +421,10 @@ class QueueModel(HardwareObject):
 
     def save_queue(self, filename=None):
         """Saves queue in the file. Current selected model is saved as a list
-        of dictionaries. Information about samples and baskets is not saved
+           of dictionaries. Information about samples and baskets is not saved
         """
         if not filename:
-            # filename = os.path.join(self.user_file_directory, "queue_active.dat")
-            filename = "queue_active.dat"
+            filename = os.path.join(self.user_file_directory, "queue_active.dat")
 
         items_to_save = []
 
@@ -503,19 +501,19 @@ class QueueModel(HardwareObject):
                     )
                     for child in task_group_entry.get_children():
                         child.set_snapshot(snapshot)
-                self.log.info("Queue loading done")
+                logging.getLogger("HWR").info("Queue loading done")
             except Exception:
-                self.log.exception("Unable to load queue")
+                logging.getLogger("HWR").exception("Unable to load queue")
 
     def load_queue_from_file(self, filename, snapshot=None):
         """Loads queue from file. The problem is snapshots that are
-        not stored in the file, so we have to add new ones in
-        the loading process
+           not stored in the file, so we have to add new ones in
+           the loading process
 
-        :returns: model name 'free-pin', 'ispyb' or 'plate'
+           :returns: model name 'free-pin', 'ispyb' or 'plate'
         """
 
-        self.log.info("Loading queue from file %s" % filename)
+        logging.getLogger("HWR").info("Loading queue from file %s" % filename)
         load_file = None
         try:
             # Read file and clear the model
@@ -545,11 +543,13 @@ class QueueModel(HardwareObject):
                     )
                     for child in task_group_entry.get_children():
                         child.set_snapshot(snapshot)
-                self.log.info("Queue loading done")
+                logging.getLogger("HWR").info("Queue loading done")
             else:
-                self.log.info("No queue content available in file")
+                logging.getLogger("HWR").info("No queue content available in file")
             return decoded_file[0]
         except Exception:
-            self.log.exception("Unable to load queue " + "from file %s", filename)
+            logging.getLogger("HWR").exception(
+                "Unable to load queue " + "from file %s", filename
+            )
             if load_file:
                 load_file.close()

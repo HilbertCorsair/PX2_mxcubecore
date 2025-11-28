@@ -1,5 +1,5 @@
-from mxcubecore import HardwareRepository as HWR
 from mxcubecore.HardwareObjects.ExpMotor import ExpMotor
+from mxcubecore import HardwareRepository as HWR
 
 
 class MicrodiffFocusMotor(ExpMotor):
@@ -7,6 +7,7 @@ class MicrodiffFocusMotor(ExpMotor):
         ExpMotor.__init__(self, name)
 
     def init(self):
+
         if HWR.beamline.diffractometer.in_plate_mode():
             self.actuator_name = self.get_property("centring_focus")
         else:

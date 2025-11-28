@@ -1,7 +1,9 @@
-import time
-
-from mxcubecore import HardwareRepository as HWR
+#
 from mxcubecore.HardwareObjects.CatsMaint import CatsMaint
+from mxcubecore import HardwareRepository as HWR
+
+import logging
+import time
 
 
 class PX1CatsMaint(CatsMaint):
@@ -10,6 +12,7 @@ class PX1CatsMaint(CatsMaint):
         self.home_opened = None
 
     def init(self):
+
         CatsMaint.init(self)
 
         self._chnHomeOpened = self.add_channel(
@@ -46,18 +49,18 @@ class PX1CatsMaint(CatsMaint):
 
     def _do_home_open(self, unload=False):
         if unload and self.loaded:
-            self.log.debug("Unloading sample first")
+            logging.getLogger("HWR").debug("Unloading sample first")
             self.cats_hwo._do_unload()
             time.sleep(3)
             while HWR.beamline.sample_changer._is_device_busy():
                 time.sleep(0.3)
 
-        self.log.debug("Running the home command (home/open) now")
+        logging.getLogger("HWR").debug("Running the home command (home/open) now")
         self._cmdHome()
 
     def _do_dry_soak(self):
         self._cmdDrySoak()
 
     def _do_reset(self):
-        self.log.debug("PX1CatsMaint: executing the _do_reset function")
+        logging.getLogger("HWR").debug("PX1CatsMaint: executing the _do_reset function")
         self._cmdReset()

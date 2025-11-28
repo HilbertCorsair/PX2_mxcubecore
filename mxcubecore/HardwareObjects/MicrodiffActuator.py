@@ -2,19 +2,20 @@
 Use the exporter to set different MD2 actuators in/out.
 If private_state not specified, True will be send to set in and False for out.
 Example xml file:
-<object class="MicrodiffActuator">
-  <username>Scintillator</username>
+<device class="MicrodiffActuator">
+  <username>Scintilator</username>
   <exporter_address>wid30bmd2s:9001</exporter_address>
   <cmd_name>ScintillatorPosition</cmd_name>
   <private_state>{"PARK":"out", "SCINTILLATOR":"in"}</private_state>
   <use_hwstate>True</use_hwstate>
-</object>
+</device>
 """
 
 import logging
 import time
-
-from mxcubecore.HardwareObjects.abstract.AbstractActuator import AbstractActuator
+from mxcubecore.HardwareObjects.abstract.AbstractActuator import (
+    AbstractActuator,
+)
 from mxcubecore.TaskUtils import task
 
 
@@ -54,7 +55,7 @@ class MicrodiffActuator(AbstractActuator):
             tt = float(self.get_property("timeout"))
             self.timeout = tt
         except TypeError:
-            self.log.exception("")
+            pass
 
         if self.get_property("use_hwstate"):
             self.hwstate_attr = self.add_channel(

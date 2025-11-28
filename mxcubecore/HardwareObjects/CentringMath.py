@@ -1,9 +1,8 @@
-import math
-
-import numpy
-
 from mxcubecore import HardwareRepository as HWR
 from mxcubecore.BaseHardwareObjects import Procedure
+import math
+import numpy
+import logging
 
 
 class CentringMath(Procedure):
@@ -11,56 +10,36 @@ class CentringMath(Procedure):
     CentringMath procedure
     """
 
-    def __init__(self, name: str):
-        super().__init__(name)
-        self._gonio_axes = []
-        self._camera_axes = []
-
     def init(self):
         """
         Ggonio axes definitions are static
         motorHO is expected to have get_value() that returns coordinate in mm
         """
-
-        def get_axis_property(property_name: str) -> list:
-            #
-            # get 'axis' key from the specified config property
-            #
-            # treat the property as optional, if not specified,
-            # return an empty list
-            #
-            return self.get_property(property_name, {}).get("axis", [])
-
-        def get_gonio_axes():
-            for axis in get_axis_property("gonioAxes"):
-                yield {
-                    "type": axis["type"],
-                    "direction": eval(axis["direction"]),
-                    "motor_name": axis["motorname"],
-                    "motor_HO": (
-                        HWR.get_hardware_repository().get_hardware_object(
-                            axis["motorHO"]
-                        )
+        self.motorConstraints = []
+        self.gonioAxes = []
+        for axis in self["gonioAxes"]:
+            self.gonioAxes.append(
+                {
+                    "type": axis.type,
+                    "direction": eval(axis.direction),
+                    "motor_name": axis.motorname,
+                    "motor_HO": HWR.get_hardware_repository().get_hardware_object(
+                        axis.motorHO
                     ),
                 }
-
-        def get_camera_axes():
-            for axis in get_axis_property("cameraAxes"):
-                yield {
-                    "axis_name": axis["axisname"],
-                    "direction": eval(axis["direction"]),
-                }
-
-        self.motorConstraints = []
-        self._gonio_axes = list(get_gonio_axes())
+            )
 
         """
         This version is lacking video microscope object. Therefore we model only
         static camera axes directions, but no camera axes scaling or center - which
         are dynamic. Therefore, camera coordinates are relative, in mm.
         """
+        self.cameraAxes = []
+        for axis in self["cameraAxes"]:
+            self.cameraAxes.append(
+                {"axis_name": axis.axisname, "direction": eval(axis.direction)}
+            )
 
-        self._camera_axes = list(get_camera_axes())
         self.mI = numpy.diag([1.0, 1.0, 1.0])  # identity matrix
         self.calibrate()
 
@@ -81,7 +60,7 @@ class CentringMath(Procedure):
     def listOfCentringsToScreen(self, list_of_centring_dicts):
         self.factorize()
         lst = []
-        self.log.debug(
+        logging.getLogger("HWR").debug(
             " in listOfCentringToScreen - %s points in list "
             % len(list_of_centring_dicts)
         )
@@ -114,20 +93,22 @@ class CentringMath(Procedure):
 
         for l in range(0, self.translationAxesCount):
             for i in range(0, len(self.centringDataMatrix)):
-                for k in range(0, len(self._camera_axes)):
+                for k in range(0, len(self.cameraAxes)):
                     V[l] += (
                         self.centringDataTensor[i][l][k] * self.centringDataMatrix[i][k]
                     )
             for m in range(0, self.translationAxesCount):
                 for i in range(0, len(self.centringDataMatrix)):
-                    for k in range(0, len(self._camera_axes)):
+                    for k in range(0, len(self.cameraAxes)):
                         M[l][m] += (
                             self.centringDataTensor[i][l][k]
                             * self.centringDataTensor[i][m][k]
                         )
         tau_cntrd = numpy.dot(numpy.linalg.pinv(M, rcond=1e-6), V)
 
+        # print tau_cntrd
         tau_cntrd = self.apply_constraints(M, tau_cntrd)
+        # print tau_cntrd
 
         return self.vector_to_centred_positions(
             -tau_cntrd + self.translation_datum(), return_by_name
@@ -148,10 +129,10 @@ class CentringMath(Procedure):
 
     def factor_matrix(self):
         # This should be connected to goniostat rotation datum update, with F globalized
-        F = numpy.zeros(shape=(self.translationAxesCount, len(self._camera_axes)))
+        F = numpy.zeros(shape=(self.translationAxesCount, len(self.cameraAxes)))
         R = self.mI
         j = 0
-        for axis in self._gonio_axes:  # skip base gonio axis
+        for axis in self.gonioAxes:  # skip base gonio axis
             if axis["type"] == "rotation":
                 Ra = self.rotation_matrix(
                     axis["direction"], axis["motor_HO"].get_value()
@@ -160,7 +141,7 @@ class CentringMath(Procedure):
             elif axis["type"] == "translation":
                 f = numpy.dot(R, axis["direction"])
                 k = 0
-                for camera_axis in self._camera_axes:
+                for camera_axis in self.cameraAxes:
                     F[j][k] = numpy.dot(f, camera_axis["direction"])
                     k += 1
                 j += 1
@@ -168,7 +149,7 @@ class CentringMath(Procedure):
 
     def calibrate(self):
         count = 0
-        for axis in self._gonio_axes:  # make first gonio rotation matrix for base axis
+        for axis in self.gonioAxes:  # make first gonio rotation matrix for base axis
             if axis["type"] == "rotation":
                 d = axis["direction"]
                 axis["mT"] = numpy.outer(d, d)
@@ -180,7 +161,7 @@ class CentringMath(Procedure):
                 count += 1
         self.translationAxesCount = count
         count = 0
-        for axis in self._camera_axes:
+        for axis in self.cameraAxes:
             axis["index"] = count
             count += 1
 
@@ -196,7 +177,7 @@ class CentringMath(Procedure):
 
     def translation_datum(self):
         vector = []
-        for axis in self._gonio_axes:
+        for axis in self.gonioAxes:
             if axis["type"] == "translation":
                 vector.append(axis["motor_HO"].get_value())
         return vector
@@ -204,7 +185,7 @@ class CentringMath(Procedure):
     def centred_positions_to_vector(self, centrings_dictionary):
         vector = numpy.zeros(shape=(self.translationAxesCount))
         index = 0
-        for axis in self._gonio_axes:
+        for axis in self.gonioAxes:
             if axis["type"] == "translation":
                 motname = axis["motor_name"]
                 if centrings_dictionary[motname] is not None:
@@ -217,7 +198,7 @@ class CentringMath(Procedure):
     def vector_to_centred_positions(self, vector, return_by_name=False):
         dic = {}
         index = 0
-        for axis in self._gonio_axes:
+        for axis in self.gonioAxes:
             if axis["type"] == "translation":
                 if return_by_name:
                     dic[axis["motor_name"]] = vector[index]
@@ -228,16 +209,16 @@ class CentringMath(Procedure):
 
     def camera_coordinates_to_vector(self, camera_coordinates_dictionary):
         vector = []
-        for index in range(0, len(self._camera_axes)):
+        for index in range(0, len(self.cameraAxes)):
             vector.append(
-                camera_coordinates_dictionary[self._camera_axes[index]["axis_name"]]
+                camera_coordinates_dictionary[self.cameraAxes[index]["axis_name"]]
             )
         return vector
 
     def vector_to_camera_coordinates(self, vector):
         dic = {}
         index = 0
-        for axis in self._camera_axes:
+        for axis in self.cameraAxes:
             dic[axis["axis_name"]] = vector[index]
             index += 1
         return dic
@@ -245,7 +226,7 @@ class CentringMath(Procedure):
     def appendMotorConstraint(self, motor_HO, position):
         index = 0
         self.motorConstraints = []
-        for axis in self._gonio_axes:
+        for axis in self.gonioAxes:
             if axis["type"] == "translation" and motor_HO is axis["motor_HO"]:
                 index += 1
                 self.motorConstraints.append(
@@ -257,10 +238,10 @@ class CentringMath(Procedure):
         # motor_HO must reference an ALIGNMENT motor!
         # finds a projection of camera vector {"X":x,"Y":y} onto a motor axis of a
         # motor_HO
-        for axis in self._gonio_axes:
+        for axis in self.gonioAxes:
             if axis["type"] == "translation" and motor_HO is axis["motor_HO"]:
                 res = 0.0
-                for camaxis in self._camera_axes:
+                for camaxis in self.cameraAxes:
                     res = (
                         res
                         + numpy.dot(axis["direction"], camaxis["direction"])

@@ -1,6 +1,6 @@
 # encoding: utf-8
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -21,69 +21,48 @@
 """
 BeamDefiner ESRF implementation class - methods to define the size and shape of
 the beam.
-Example yml configuration:
-
-.. code-block:: yaml
-
- class: ESRF.ESRFBeam.ESRFBeam
- configuration:
-   beam_divergence_horizontal: 104
-   beam_divergence_vertical: 6.5
-   definer_type: definer   # could be also aperture or slits
- objects:
-   aperture: udiff_aperture.yml
-   definer: beam_definer.yml
-   monitor_beam: monitor_beam.yaml
 """
 
-__copyright__ = """ Copyright © by the MXCuBE collaboration """
+__copyright__ = """ Copyright © 2019 by the MXCuBE collaboration """
 __license__ = "LGPLv3+"
 
 
+import logging
+
+from mxcubecore.HardwareObjects.abstract.AbstractBeam import (
+    AbstractBeam,
+    BeamShape,
+)
 from mxcubecore import HardwareRepository as HWR
-from mxcubecore.HardwareObjects.abstract.AbstractBeam import AbstractBeam, BeamShape
 
 
 class ESRFBeam(AbstractBeam):
-    """Beam ESRF implementation"""
+    """ Beam ESRF implementation """
 
-    unit = "mm"
+    def __init__(self, name):
+        AbstractBeam.__init__(self, name)
+        self._aperture = None
+        self._slits = {}
+        self._complex = None
+        self._definer_type = None
 
-    def __init__(self, name) -> None:
-        super().__init__(name)
-        self._beam_check_obj = None
-        self._monitorbeam_obj = None
+    def init(self):
+        """ Initialize hardware """
+        AbstractBeam.init(self)
+        self._definer_type = self.get_property("definer")
 
-    def init(self) -> None:
-        """Initialize hardware"""
-        super().init()
-
-        _definer_type = []
         self._aperture = self.get_object_by_role("aperture")
-        if self._aperture:
-            _definer_type.append("aperture")
+        _bliss_obj = self.get_object_by_role("bliss")
 
         _slits = self.get_property("slits")
-        _bliss_obj = self.get_object_by_role("bliss")
         if _slits:
-            self._slits = {}
-            _definer_type.append("slits")
             for name in _slits.split():
                 _key, _val = name.split(":")
-                self._slits.update({_key: _bliss_obj.getattribute(_val)})
+                self._slits.update({_key: _bliss_obj.__getattribute__(_val)})
 
-        self._definer = self.get_object_by_role("definer")
-        if self._definer:
-            _definer_type.append("definer")
+        self._complex = self.get_object_by_role("complex")
 
-        if len(_definer_type) == 1:
-            self._definer_type = _definer_type[0]
-        else:
-            self._definer_type = None
-
-        self._definer_type = self.get_property("definer_type") or self._definer_type
-
-        beam_position = self.get_property("beam_position")
+        beam_position = self.ge_property("beam_position")
 
         if beam_position:
             self._beam_position_on_screen = tuple(map(float, beam_position.split()))
@@ -92,308 +71,196 @@ class ESRFBeam(AbstractBeam):
             self._aperture.connect("valueChanged", self._re_emit_values)
             self._aperture.connect("stateChanged", self._re_emit_values)
 
-        if self._definer:
-            self._definer.connect("valueChanged", self._re_emit_values)
-            self._definer.connect("stateChanged", self._re_emit_values)
+        if self._complex:
+            self._complex.connect("valueChanged", self._re_emit_values)
+            self._complex.connect("stateChanged", self._re_emit_values)
 
-        self._monitorbeam_obj = self.get_object_by_role("monitor_beam")
-
-        if self._monitorbeam_obj:
-            beam_check = self._monitorbeam_obj.actuator_name
-            if beam_check and _bliss_obj:
-                self._beam_check_obj = getattr(_bliss_obj, beam_check)
-
-    def _re_emit_values(self, value):
-        """Redefine as re_emit_values takes no arguments"""
+    def _re_emit_values(self, *args, **kwargs):
         self.re_emit_values()
 
-    def _get_aperture_value(self) -> tuple[list[float, float], str]:
-        """Get the size and the label of the aperture in place.
-
+    def _get_aperture_size(self):
+        """ Get the size and the label of the aperture in place.
         Returns:
-            Size [mm] [width, height], label.
+            (float, str): Size [mm], label.
         """
-        _size = self.aperture.get_value().value[1]
+        _size = self._aperture.get_value().value[1]
+
         try:
-            _label = self.aperture.get_value().name
+            _label = self._aperture.get_value().value[1]
         except AttributeError:
             _label = str(_size)
-        _size /= 1000.0
 
-        return [_size, _size], _label
+        return _size / 1000.0, _label
 
-    def _get_definer_value(self) -> tuple[list[float, float], str]:
-        """Get the size and the name of the definer in place.
-
+    def _get_complex_size(self):
+        """ Get the size and the name of the definer in place.
         Returns:
-            Size [mm] [width, height], label.
+            (float, str): Size [mm], label.
         """
         try:
-            value = self.definer.get_value()
-            if isinstance(value, tuple):
-                return [value[1], value[1]], value[0]
-            if value.name != "UNKNOWN":
-                return list(value.value), value.name
-        except AttributeError:
-            self.log.info("Could not read beam size")
-        return [-1, -1], "UNKNOWN"
+            _size = self._complex.sizeByName[self._complex.get_current_position_name()]
+            _name = self._complex.get_current_position_name()
+        except KeyError:
+            logging.getLogger("HWR").info("Could not read beam size")
+            _size, _name = (-1, -1), "UNKNOWN"
 
-    def _get_slits_size(self) -> dict[str, float]:
-        """Get the size of the slits in place.
+        return _size, _name
 
+    def _get_slits_size(self):
+        """ Get the size of the slits in place.
         Returns:
-            ``{"width": float, "height": float}``.
+            (dict): {"width": float, "heigth": float}.
         """
         beam_size = {}
-        for _key, _val in self.slits:
+        for _key, _val in self._slits:
             beam_size.update({_key: abs(_val.position)})
         return beam_size
 
-    def _get_value(self) -> tuple[float, float, BeamShape, str]:
-        """Get the size (width and height) of the beam, its shape and
-           its label. The size is in millimeters.
+    def _beam_size_compare(self, s):
+        return s[0]
 
-        Returns:
-            Four-item tuple: width, height, shape, name.
+    def get_value(self):
+        """ Get the size (width and heigth) of the beam and its shape.
+            The size is in mm.
+        Retunrs:
+            (tuple): Dictionary (width, heigth, shape, name), with types
+                               (float, float, Enum, str)
         """
-        labels = {}
-        _label = "UNKNOWN"
-        if self.aperture:
-            _size, _name = self._get_aperture_value()
-            self._beam_size_dict.update({"aperture": _size})
-            labels.update({"aperture": _name})
+        _shape = BeamShape.UNKNOWN
 
-        if self.slits:
-            _size, _name = self._get_slits_value()
-            self._beam_size_dict.update({"slits": _size})
-            labels.update({"slits": _name})
+        _beamsize_dict = {}
+        if self._aperture:
+            _size, _name = self._get_aperture_size()
+            _beamsize_dict.update({_name: [_size]})
+            _shape = BeamShape.ELIPTICAL
 
-        if self.definer:
-            _size, _name = self._get_definer_value()
-            self._beam_size_dict.update({"definer": _size})
-            labels.update({"definer": _name})
+        if self._complex:
+            _size, _name = self._get_complex_size()
+            _beamsize_dict.update({_name: _size})
+            _shape = BeamShape.ELIPTICAL
 
-        info_dict = self.evaluate_beam_info()
+        if self._slits:
+            _beamsize_dict.update({"slits": self._get_slits_size().values()})
 
+        # find which device has the minimum size
         try:
-            _label = labels[info_dict["label"]]
-            self._beam_info_dict["label"] = _label
-        except KeyError:
-            _label = info_dict["label"]
+            _val = min(_beamsize_dict.values(), key=self._beam_size_compare)
 
-        return self._beam_width, self._beam_height, self._beam_shape, _label
+            _key = [k for k, v in _beamsize_dict.items() if v == _val]
 
-    def get_value_xml(self) -> tuple[float, float, str, str]:
-        """XMLRPC does not handle Enum, the shape is transformed to string.
+            _name = _key[0]
+            self.beam_width = _val[0]
 
+            if "slits" in _key:
+                self.beam_height = _val[1]
+                _shape = BeamShape.RECTANGULAR
+            elif len(_val) > 1:
+                self.beam_height = _val[1]
+            else:
+                self.beam_height = _val[0]
+        except ValueError:
+            return None, None, _shape, "none"
+
+        return self.beam_width, self.beam_height, _shape, _name
+
+    def get_available_size(self):
+        """ Get the available predefined beam definer configuration.
         Returns:
-            Four-item tuple: width, height, shape, name
+            (dict): apertures {name: dimension} or
+                    slits {"width": motor object, "heigth", motor object} or
+                    complex definer {name: dimension}.
         """
-        beamsize = self.get_value()
-        return beamsize[0], beamsize[1], beamsize[2].value, beamsize[3]
+        _type = "enum"
+        if self._definer_type in (self._aperture, "aperture"):
+            # get list of the available apertures
+            aperture_list = self._aperture.get_diameter_size_list()
+            return {"type": [_type], "values": aperture_list}
 
-    def get_available_size(self) -> dict:
-        """Get the available predefined beam definer configuration.
-        Returns:
-            ``{"type": ["aperture"], "values": [labels]}`` or
-            ``{"type": ["definer"], "values": [labels]}`` or
-            ``{"type": ["width", "height"], "values":
-                     [low_lim_w, high_lim_w, low_lim_h, high_lim_h]}``
-        """
-        if self._definer_type == "aperture":
+        if self._definer_type in (self._complex, "complex"):
+            # return {"type": [_type], "values": self._complex.size_list}
             return {
-                "type": ["aperture"],
-                "values": self.aperture.get_diameter_size_list(),
+                "type": [_type],
+                "values": self._complex.get_predefined_positions_list(),
             }
 
-        if self._definer_type == "definer":
-            return {
-                "type": ["definer"],
-                "values": self.definer.get_predefined_positions_list(),
-            }
-
-        if self._definer_type in (self.slits, "slits"):
+        if self._definer_type in (self._slits, "slits"):
             # get the list of the slits motors range
-            _low_w, _high_w = self.slits["width"].get_limits()
-            _low_h, _high_h = self.slits["height"].get_limits()
+            _low_w, _high_w = self._slits["width"].get_limits()
+            _low_h, _high_h = self._slits["height"].get_limits()
             return {
-                "type": ["width", "height"],
+                "type": ["range", "range"],
                 "values": [_low_w, _high_w, _low_h, _high_h],
             }
 
-        return {}
+        return None
 
-    def get_defined_beam_size(self) -> dict:
-        """Get the predefined beam labels and size.
-
-        Returns:
-            Dictionary with list of available beam size labels and
-            the corresponding size (width,height) tuples.
-            ``{"label": [str, str, ...], "size": [(w,h), (w,h), ...]}``
-        """
-        labels = []
-        values = []
-
-        if self._definer_type == "slits":
-            # get the list of the slits motors range
-            _low_w, _high_w = self.slits["width"].get_limits()
-            _low_h, _high_h = self.slits["height"].get_limits()
-            return {
-                "label": ["low", "high"],
-                "size": [(_low_w, _low_h), (_high_w, _high_h)],
-            }
-
-        if self._definer_type == "aperture":
-            _enum = self.aperture.VALUES
-        elif self._definer_type == "definer":
-            _enum = self.definer.VALUES
-        elif "aperture" in self._definer_type:
-            _enum = self.aperture.VALUES
-
-        for value in _enum:
-            _nam = value.name
-            if _nam not in ["IN", "OUT", "UNKNOWN"]:
-                labels.append(_nam)
-                if isinstance(value.value, tuple):
-                    values.append(value.value)
-                else:
-                    values.append(value.value[0])
-        return {"label": labels, "size": values}
-
-    def _set_slits_size(self, size: list[float, float]):
-        """Move the slits to the desired position.
-
+    def _set_slits_size(self, size=None):
+        """ Move the slits to the desired position.
         Args:
-            Two-items list:  width, height in millimeters.
-
+            size (list): Width, heigth [mm].
         Raises:
             RuntimeError: Size out of the limits.
                TypeError: Invalid size
         """
-
-        if not isinstance(size, list):
-            msg = "Incorrect input value for slits"
-            raise TypeError(msg)
-        w_lim = self.slits["width"].get_limits()
-        h_lim = self.slits["height"].get_limits()
+        w_lim = self._slits["width"].get_limits()
+        h_lim = self._slits["heigth"].get_limits()
         try:
-            msg = "Size out of the limits"
             if min(w_lim) > size[0] > max(w_lim):
-                raise RuntimeError(msg)
+                raise RuntimeError("Size out of the limits")
             if min(h_lim) > size[1] > max(h_lim):
-                raise RuntimeError(msg)
-            self.slits["width"].set_value(size[0])
-            self.slits["height"].set_value(size[1])
-        except TypeError as err:
-            raise TypeError("Invalid size") from err
+                raise RuntimeError("Size out of the limits")
+            self._slits["width"].set_value(size[0])
+            self._slits["heigth"].set_value(size[1])
+        except TypeError:
+            raise TypeError("Invalid size")
 
-    def _set_aperture_size(self, size: str):
-        """Move the aperture to the desired size.
-
+    def _set_aperture_size(self, size=None):
+        """ Move the aperture to the desired size.
         Args:
-            The position name.
-
-        Raises:
-            TypeError
+            size (str): The position name.
         """
-        if not isinstance(size, str):
-            msg = "Incorrect input value for aperture"
-            raise TypeError(msg)
-
         try:
-            _ap = self.aperture.VALUES[size]
-        except KeyError:
-            _ap = self.aperture.VALUES[f"A{size}"]
+            _e = getattr(self._aperture.VALUES, "A" + size)
+        except AttributeError:
+            _e = getattr(self._aperture.VALUES, size)
 
-        self.aperture.set_value(_ap)
+        self._aperture.set_value(_e)
 
-    def _set_definer_size(self, size: str):
-        """Move the definer to the desired size.
-
+    def _set_complex_size(self, size=None):
+        """ Move the complex definer to the desired size.
         Args:
-            The position name.
-
-        Raises:
-            TypeError: Invalid size.
+            size (str): The position name.
         """
-        if not isinstance(size, str):
-            msg = "Incorrect input value for definer"
-            raise TypeError(msg)
+        self._complex.move_to_position(size)
 
-        self._definer.set_value(self.definer.VALUES[size])
-
-    def set_value(self, size: list[float] | str | None = None):
-        """Set the beam size.
-
+    def set_value(self, size=None):
+        """Set the beam size
         Args:
-            Two-items list: width and height for slits or
-            aperture or definer name.
-
+            size (list): Width, heigth or
+                  (str): Aperture or complex definer name.
         Raises:
             RuntimeError: Beam definer not configured
                           Size out of the limits.
         """
-        if self._definer_type in (self.slits, "slits"):
+        if self._definer_type in (self._slits, "slits"):
             self._set_slits_size(size)
 
-        if self._definer_type in (self.aperture, "aperture"):
+        if self._definer_type in (self._aperture, "aperture"):
             self._set_aperture_size(size)
 
-        if self._definer_type in (self.definer, "definer"):
-            self._set_definer_size(size)
+        if self._definer_type in (self._complex, "complex"):
+            self._set_complex_size(size)
 
-    def get_beam_position_on_screen(self) -> list[int, int]:
-        """Get the beam position.
-
-        Returns:
-            X and Y coordinates of the beam position in pixels.
-        """
-        try:
-            _beam_position_on_screen = HWR.beamline.diffractometer.get_beam_position()
-        except AttributeError:
-            msg = "Could not read beam position from MD, using OAV center"
-            self.log.warning(msg)
-            _beam_position_on_screen = (
-                HWR.beamline.sample_view.camera.get_width() / 2,
-                HWR.beamline.sample_view.camera.get_height() / 2,
-            )
-
-        self._beam_position_on_screen = _beam_position_on_screen
-
-        return self._beam_position_on_screen
-
-    def get_beam_size(self) -> tuple[float, float]:
-        """Get the beam size.
-
-        Returns:
-            Two-item tuple: width and height.
-        """
-        beam_value = self.get_value()
-        return beam_value[0], beam_value[1]
-
-    def _is_beam(self) -> bool:
-        """Check if there is beam.
-
-        Returns:
-            ``True`` if beam present, ``False`` otherwise
-        """
-        return self._beam_check_obj.is_beam()
-
-    def wait_for_beam(self, timeout: float | None = None):
-        """Wait until beam present.
-
-        Args:
-            Optional - timeout in seconds,
-            If timeout == 0: return at once and do not wait.
-            if timeout is None: wait forever (default).
-
-        Raises:
-            RuntileError if no beam after the specified timeout.
-        """
-        if self._monitorbeam_obj:
+    def get_beam_position_on_screen(self):
+        if self._beam_position_on_screen == (0, 0):
             try:
-                timeout = timeout or self._beam_check_obj.timeout
-                if self._monitorbeam_obj.get_value().value:
-                    self._beam_check_obj.wait_for_beam(timeout)
+                _beam_position_on_screen = (
+                    HWR.beamline.diffractometer.get_beam_position()
+                )
             except AttributeError:
-                self.log.exception("")
+                _beam_position_on_screen = (
+                    HWR.beamline.sample_view.camera.get_width() / 2,
+                    HWR.beamline.sample_view.camera.get_height() / 2,
+                )
+            self._beam_position_on_screen = _beam_position_on_screen
+        return self._beam_position_on_screen

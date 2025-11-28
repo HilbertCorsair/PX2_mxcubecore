@@ -1,254 +1,316 @@
-# encoding: utf-8
-#
-#  Project name: MXCuBE
-#  https://github.com/mxcube
-#
-#  This file is part of MXCuBE software.
-#
-#  MXCuBE is free software: you can redistribute it and/or modify
-#  it under the terms of the GNU Lesser General Public License as published by
-#  the Free Software Foundation, either version 3 of the License, or
-#  (at your option) any later version.
-#
-#  MXCuBE is distributed in the hope that it will be useful,
-#  but WITHOUT ANY WARRANTY; without even the implied warranty of
-#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#  GNU Lesser General Public License for more details.
-#
-#  You should have received a copy of the GNU General Lesser Public License
-#  along with MXCuBE. If not, see <http://www.gnu.org/licenses/>.
+"""
+Represents Abstract XRF spectrum (name could be discussed) Abstract class is
+compatible with queue_entry and emits these signals during the spectrum:
+ - xrfSpectrumStarted
+ - xrfSpectrumFinished
+ - xrfSpectrumFailed
+ - xrfSpectrumStatusChanged
 
-"""Abstract XRF spectrum class. Compliant with queue_entry/xrf_spectrum.py"""
+Functions that needs a reimplementation:
+- execute_spectrum_command : actual execution command
+- cancel_spectrum
+"""
 
-import abc
+import os
 import logging
 import time
-from pathlib import Path
-
 import gevent
-
+import gevent.event
+import numpy
+import abc
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_agg import FigureCanvasAgg
+from mxcubecore.TaskUtils import cleanup
 from mxcubecore import HardwareRepository as HWR
-from mxcubecore.BaseHardwareObjects import HardwareObject
-
-__copyright__ = """ Copyright © by the MXCuBE collaboration """
-__license__ = "LGPLv3+"
 
 
-class AbstractXRFSpectrum(HardwareObject):
-    """Abstract XRFSpectrum procedure.
-
-    Emits:
-        stateChanged: ("stateChanged", (state))
-        xrfSpectrumStatusChanged: ("xrfSpectrumStatusChanged", (error_msg)
-
-    Attributes:
-        default_integration_time (float): Time [s]
-        spectrum_info_dict (dict): keys defined by the lims model.
-        lims: reference to the lims hardware object
-
-    States:
-        HardwareObjectStates: READY, BUSY, FAULT
-
-    Note:
-        _execute_spectrum and spectrum_analyse are hooks to be overloaded
-        for specific implementation.
+class AbstractXRFSpectrum(object):
+    """
+    Descript.
     """
 
     __metaclass__ = abc.ABCMeta
 
-    def __init__(self, name):
-        super().__init__(name)
-        self.lims = None
-        self.spectrum_info_dict = {}
-        self.default_integration_time = None
-        self.cpos = None
+    def __init__(self):
+        """
+        Descript. :
+        """
+        self.ready_event = None
+        self.spectrum_info = None
+        self.spectrum_data = None
+        self.mca_calib = (10, 20, 0)
+        self.spectrum_running = None
+        self.config_filename = ""
+        self.write_in_raw_data = True
 
-    def init(self):
-        """Initialisation"""
-        self.default_integration_time = self.get_property("default_integration_time", 3)
-        self.file_suffix = self.get_property("file_suffix", "dat")
-        self.lims = HWR.beamline.lims
-        if not self.lims:
-            logging.getLogger().warning("XRFSpectrum: no lims set")
+        self.ready_event = gevent.event.Event()
+        self.startXrfSpectrum = self.start_spectrum
 
     def start_spectrum(
         self,
-        integration_time: float | None = None,
-        data_dir: str | None = None,
-        prefix: str | None = None,
-        archive_dir: str | None = None,
-        session_id: int | None = None,
-        blsample_id: int | None = None,
-        cpos: dict | None = None,
+        ct,
+        spectrum_directory,
+        archive_directory,
+        prefix,
+        session_id=None,
+        blsample_id=None,
+        adjust_transmission=True,
+        excitation_energy=15.,
     ):
-        """Start the procedure. Called by the queue_model.
-
-        Args:
-            integration_time: Inregration time [s].
-            data_dir: Directory to save the data (full path).
-            archive_dir: Directory to save the archive data (full path).
-            prefix: File prefix
-            session_id: Session ID number (from ISpyB)
-            blsample_id: Sample ID number (from ISpyB)
-            cpos: The centred position motors and their values.
         """
-        self.cpos = cpos
-        self.spectrum_info_dict = {"sessionId": session_id, "blSampleId": blsample_id}
-        integration_time = integration_time or self.default_integration_time
-        self.spectrum_info_dict["exposureTime"] = integration_time
-        self.spectrum_info_dict["filename"] = ""
+        Descript. :
+        """
+        if not self.can_spectrum:
+            self.spectrum_command_aborted()
+            return False
+        self.spectrum_info = {"sessionId": session_id, "blSampleId": blsample_id}
 
-        # Create the data and the archive directory (if needed) and files
-        if data_dir:
-            if not self.create_directory(data_dir):
-                self.update_state(self.STATES.FAULT)
-                return False
-            filename = self.get_filename(data_dir, prefix)
-            self.spectrum_info_dict["filename"] = filename + "." + self.file_suffix
-        if archive_dir:
-            if not self.create_directory(archive_dir):
-                self.update_state(self.STATES.FAULT)
-                return False
-            filename = self.get_filename(archive_dir, prefix)
-            self.spectrum_info_dict["scanFileFullPath"] = (
-                filename + "." + self.file_suffix
+        if self.write_in_raw_data and not os.path.isdir(spectrum_directory):
+            logging.getLogger("HWR").debug(
+                "XRFSpectrum: creating directory %s" % spectrum_directory
             )
-            self.spectrum_info_dict["jpegScanFileFullPath"] = filename + ".png"
-            self.spectrum_info_dict["annotatedPymcaXfeSpectrum"] = filename + ".html"
-            self.spectrum_info_dict["fittedDataFileFullPath"] = filename + "_peaks.csv"
-
-        self.spectrum_info_dict["startTime"] = time.strftime("%Y-%m-%d %H:%M:%S")
-        self.update_state(self.STATES.BUSY)
-
-        gevent.spawn(
-            self.execute_spectrum,
-            integration_time,
-            self.spectrum_info_dict["filename"],
-        )
-        return True
-
-    def execute_spectrum(
-        self,
-        integration_time: float | None = None,
-        filename: str | None = None,
-    ):
-        """Do the acquisition.
-
-        Args:
-            integration_time: MCA integration time [s].
-            filename: Data file (full path).
-        Raises:
-            RuntimeError: Cannot acquire data.
-        """
-        if filename:
-            self.spectrum_info_dict["filename"] = filename
-
-        integration_time = integration_time or self.default_integration_time
-
-        try:
-            if self._execute_spectrum(integration_time, filename):
-                self.spectrum_command_finished()
-        except RuntimeError as err:
-            msg = f"XRFSpectrum: could not acquire spectrum, {err}"
-            logging.getLogger("user_level_log").exception(msg)
-            self.spectrum_status_change(msg)
-            self.update_state(self.STATES.FAULT)
-
-    @abc.abstractmethod
-    def _execute_spectrum(
-        self,
-        integration_time: float | None = None,
-        filename: str | None = None,
-    ) -> bool:
-        """Specific XRF acquisition procedure"""
-        return True
-
-    def create_directory(self, directory: str) -> bool:
-        """Create a directory, if needed.
-        Args:
-            directory: Directory to save the data (full path).
-        Returns:
-           ``True`` if directory created or already exists, ``False`` if error.
-        """
-        if not Path(directory).is_dir():
-            msg = f"XRFSpectrum: directory creating {directory}"
             try:
-                if not Path(directory).exists():
-                    logging.getLogger("user_level_log").debug(msg)
-                    Path(directory).mkdir(parents=True)
-                return True
-            except OSError as err:
-                msg += f": {err}"
-                logging.getLogger().error(msg)
-                self.spectrum_status_change("Error creating directory")
+                if not os.path.exists(spectrum_directory):
+                    os.makedirs(spectrum_directory)
+            except OSError as diag:
+                logging.getLogger().error(
+                    "XRFSpectrum: error creating directory %s (%s)"
+                    % (spectrum_directory, str(diag))
+                )
+                self.emit("xrfSpectrumStatusChanged", ("Error creating directory",))
                 self.spectrum_command_aborted()
-
-                self.log.exception("")
                 return False
-        return True
 
-    def get_filename(self, directory: str, prefix: str) -> str:
-        """Create file template.
-        Args:
-            directory(str): directory name (full path)
-        Returns:
-            (str): File template
+        if not os.path.isdir(archive_directory):
+            try:
+                if not os.path.exists(archive_directory):
+                    os.makedirs(archive_directory)
+            except OSError as diag:
+                logging.getLogger().error(
+                    "XRFSpectrum: error creating directory %s (%s)"
+                    % (archive_directory, str(diag))
+                )
+                self.emit("xrfSpectrumStatusChanged", ("Error creating directory",))
+                self.spectrum_command_aborted()
+                return False
+
+        archive_file_template = os.path.join(archive_directory, prefix)
+        spectrum_file_template = os.path.join(spectrum_directory, prefix)
+        if os.path.exists(archive_file_template + ".dat"):
+            i = 1
+            while os.path.exists(archive_file_template + "%d.dat" % i):
+                i = i + 1
+            archive_file_template += "_%d" % i
+            spectrum_file_template += "_%d" % i
+            prefix += "_%d" % i
+
+        spectrum_file_dat_filename = os.path.extsep.join(
+            (spectrum_file_template, "dat")
+        )
+        archive_file_dat_filename = os.path.extsep.join((archive_file_template, "dat"))
+        archive_file_png_filename = os.path.extsep.join((archive_file_template, "png"))
+        archive_file_html_filename = os.path.extsep.join(
+            (archive_file_template, "html")
+        )
+
+        self.spectrum_info["filename"] = prefix
+        self.spectrum_info["workingDirectory"] = archive_directory
+        self.spectrum_info["scanFilePath"] = spectrum_file_dat_filename
+        self.spectrum_info["scanFileFullPath"] = archive_file_dat_filename
+        self.spectrum_info["jpegScanFileFullPath"] = archive_file_png_filename
+        self.spectrum_info["exposureTime"] = ct
+        self.spectrum_info["annotatedPymcaXfeSpectrum"] = archive_file_html_filename
+        self.spectrum_info["htmldir"] = archive_directory
+        self.spectrum_command_started()
+        logging.getLogger("HWR").debug(
+            "XRFSpectrum: spectrum dat file is %s", spectrum_file_dat_filename
+        )
+        logging.getLogger("HWR").debug(
+            "XRFSpectrum: archive file is %s", archive_file_dat_filename
+        )
+
+        self.execute_spectrum_command(
+            ct, spectrum_file_dat_filename, adjust_transmission
+        )
+
+    def can_spectrum(self):
+        return
+
+    def execute_spectrum_command(self, count_time, filename, adjust_transmission=True):
         """
-        _pattern = f"{prefix}_{time.strftime('%d_%b_%Y')}_%02d_xrf"
-        filename = Path(directory) / (_pattern % 1)
-
-        i = 2
-        while Path(filename).is_file():
-            filename = Path(directory) / (_pattern % i)
-            i += 1
-
-        return str(filename)
-
-    def spectrum_status_change(self, status_msg: str):
-        """Emit the signal xrfSpectrumStatusChanged with appropriate message.
-        Args:
-            status_msg(str): Message to send.
+        Descript. :
         """
-        self.emit("xrfSpectrumStatusChanged", (status_msg,))
+        pass
+
+    def cancel_spectrum(self, *args):
+        """
+        Descript. :
+        """
+        pass
+
+    def spectrum_command_ready(self):
+        """
+        Descript. :
+        """
+        if not self.spectrum_running:
+            self.emit("xrfSpectrumReady", (True,))
+
+    def spectrum_command_not_ready(self):
+        """
+        Descript. :
+        """
+        if not self.spectrum_running:
+            self.emit("xrfSpectrumReady", (False,))
+
+    def spectrum_command_started(self, *args):
+        """
+        Descript. :
+        """
+        self.spectrum_info["startTime"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        self.spectrum_running = True
+        self.emit("xrfSpectrumStarted", ())
+
+    def spectrum_command_failed(self, *args):
+        """
+        Descript. :
+        """
+        self.spectrum_info["endTime"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        self.spectrum_running = False
+        self.store_xrf_spectrum()
+        self.emit("xrfSpectrumFailed", ())
+        self.ready_event.set()
+
+    def spectrum_command_aborted(self, *args):
+        """
+        Descript. :
+        """
+        self.spectrum_running = False
+        self.emit("xrfSpectrumFailed", ())
+        self.ready_event.set()
 
     def spectrum_command_finished(self):
-        """Actions to do if spectrum acquired."""
-        self.spectrum_info_dict["endTime"] = time.strftime("%Y-%m-%d %H:%M:%S")
-        if HWR.beamline.transmission:
-            self.spectrum_info_dict["beamTransmission"] = (
-                HWR.beamline.transmission.get_value()
-            )
-        if HWR.beamline.energy:
-            self.spectrum_info_dict["energy"] = HWR.beamline.energy.get_value()
-        if HWR.beamline.flux:
-            self.spectrum_info_dict["flux"] = HWR.beamline.flux.get_value()
-        if HWR.beamline.beam:
-            size = HWR.beamline.beam.get_value()
-            self.spectrum_info_dict["beamSizeHorizontal"] = size[0]
-            self.spectrum_info_dict["beamSizeVertical"] = size[1]
-        self.spectrum_analyse()
-        if self.lims:
-            self.spectrum_store_lims()
-        self.update_state(self.STATES.READY)
-
-    def spectrum_analyse(self):
-        """Get the spectrum data. Do analysis and save fitted data.
-        The method has to be implemented as specific for each site, but
-        is only optional.
         """
+        Descript. :
+        """
+        with cleanup(self.ready_event.set):
+            self.spectrum_info["endTime"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            self.spectrum_running = False
 
-    def spectrum_command_aborted(self):
-        """Spectrum aborted actions"""
-        self.update_state(self.STATES.READY)
+            xmin = 0
+            xmax = 20
+            mca_data = []
+            calibrated_data = []
 
-    def spectrum_command_failed(self):
-        """Spectrum failed actions"""
-        self.spectrum_info_dict["endTime"] = time.strftime("%Y-%m-%d %H:%M:%S")
-        if self.lims:
-            self.spectrum_store_lims()
-        self.update_state(self.STATES.FAULT)
+            spectrum_file_raw = None
+            archive_file_raw = None
 
-    def spectrum_store_lims(self):
-        """Store the data in lims, according to the existing data model."""
-        if self.spectrum_info_dict.get("sessionId"):
-            self.lims.store_xfe_spectrum(self.spectrum_info_dict)
+            if self.write_in_raw_data:
+                try:
+                    spectrum_file_raw = open(self.spectrum_info["scanFilePath"], "w")
+                except Exception:
+                    logging.getLogger("HWR").exception(
+                        "XRFSpectrum: could not create spectrum result raw file %s"
+                        % self.spectrum_info["scanFilePath"]
+                    )
+
+            try:
+                archive_file_raw = open(self.spectrum_info["scanFileFullPath"], "w")
+            except Exception:
+                logging.getLogger("HWR").exception(
+                    "XRFSpectrum: could not create spectrum result raw file %s"
+                    % self.spectrum_info["scanFileFullPath"]
+                )
+
+            for n, value in enumerate(self.spectrum_data):
+                energy = (
+                    self.mca_calib[2]
+                    + self.mca_calib[1] * n
+                    + self.mca_calib[0] * n * n
+                ) / 1000
+                if energy < 20:
+                    # if energy > xmax:
+                    #    xmax = value
+                    # if energy < xmin:
+                    #    xmin = value
+                    calibrated_data.append([energy, value])
+                    mca_data.append((n, value))
+                    if spectrum_file_raw:
+                        spectrum_file_raw.write("%f,%f\r\n" % (energy, value))
+                    if archive_file_raw:
+                        archive_file_raw.write("%f,%f\r\n" % (energy, value))
+            if spectrum_file_raw:
+                spectrum_file_raw.close()
+            if archive_file_raw:
+                archive_file_raw.close()
+            calibrated_array = numpy.array(calibrated_data)
+
+            if HWR.beamline.transmission is not None:
+                self.spectrum_info[
+                    "beamTransmission"
+                ] = HWR.beamline.transmission.get_value()
+            self.spectrum_info["energy"] = self.get_current_energy()
+            if HWR.beamline.beam is not None:
+                beam_size_hor, beam_size_ver = HWR.beamline.beam.get_beam_size()
+                self.spectrum_info["beamSizeHorizontal"] = int(beam_size_hor * 1000)
+                self.spectrum_info["beamSizeVertical"] = int(beam_size_ver * 1000)
+
+            mca_config = {}
+            mca_config["legend"] = self.spectrum_info["filename"]
+            mca_config["file"] = self.config_filename
+            mca_config["min"] = xmin
+            mca_config["max"] = xmax
+            mca_config["htmldir"] = self.spectrum_info["htmldir"]
+            self.spectrum_info.pop("htmldir")
+            self.spectrum_info.pop("scanFilePath")
+
+            self.emit("xrfSpectrumFinished", (mca_data, self.mca_calib, mca_config))
+
+            fig = Figure(figsize=(15, 11))
+            ax = fig.add_subplot(111)
+            #ax.set_title(r"%s" % os.path.basename(self.spectrum_info["jpegScanFileFullPath"]))
+            ax.set_title("XRF spectrum")
+            ax.grid(True)
+
+            ax.plot(*(zip(*calibrated_array)), **{"color": "black"})
+            ax.set_xlabel("Energy [keV]")
+            ax.set_ylabel("Counts")
+            canvas = FigureCanvasAgg(fig)
+            logging.getLogger().info(
+                "XRFSpectrum: Rendering spectrum to PNG file : %s",
+                self.spectrum_info["jpegScanFileFullPath"],
+            )
+            canvas.print_figure(self.spectrum_info["jpegScanFileFullPath"], dpi=80)
+            # logging.getLogger().debug("Copying .fit file to: %s", a_dir)
+            # tmpname=filename.split(".")
+            # logging.getLogger().debug("finished %r", self.spectrum_info)
+            self.store_xrf_spectrum()
+            # self.emit("xrfSpectrumFinished", (mca_data, self.mca_calib, mca_config))
+
+    def spectrum_status_changed(self, status):
+        """
+        Descript. :
+        """
+        self.emit("xrfSpectrumtatusChanged", (status,))
+
+    def store_xrf_spectrum(self):
+        """
+        Descript. :
+        """
+        logging.getLogger().debug("XRFSpectrum info %r", self.spectrum_info)
+        if HWR.beamline.lims:
+            try:
+                session_id = int(self.spectrum_info["sessionId"])
+            except Exception:
+                return
+            blsampleid = self.spectrum_info["blSampleId"]
+            HWR.beamline.lims.storeXfeSpectrum(self.spectrum_info)
+
+    def get_current_energy(self):
+        """
+        Descript. :
+        """
+        if HWR.beamline.energy is not None:
+            try:
+                return HWR.beamline.energy.get_value()
+            except Exception:
+                logging.getLogger("HWR").exception("XRFSpectrum: couldn't read energy")

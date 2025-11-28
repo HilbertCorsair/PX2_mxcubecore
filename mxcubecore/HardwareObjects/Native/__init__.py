@@ -1,15 +1,10 @@
 # -*- coding: utf-8 -*-
 
+import jsonpickle
 import inspect
 import logging
-
-import jsonpickle
-
-from mxcubecore import HardwareRepository as HWR
-from mxcubecore.model import (
-    queue_model_enumerables,
-    queue_model_objects,
-)
+from mxcubecore.HardwareObjects import queue_model_objects
+from mxcubecore.HardwareObjects import queue_model_enumerables
 
 xmlrpc_prefix = ""
 
@@ -35,7 +30,7 @@ def queue_get_available_serialisations(self):
 
 def queue_add_node(server_hwobj, task_node, set_on=True):
     """
-    Adds the TaskNode objects contained in the json serialized
+    Adds the TaskNode objects contained in the json seralized
     list of TaskNodes passed in <task_node>.
 
     The TaskNodes are marked as activated in the queue if <set_on>
@@ -106,11 +101,6 @@ def queue_update_result(server_hwobj, node_id, html_report):
     return result
 
 
-def queue_get_full_paths(server_hwobj, subdir, tag):
-    """ """
-    return HWR.beamline.session.get_full_paths(subdir, tag)
-
-
 def queue_get_model_code(server_hwobj):
     """
     returns a list of tuples of (name of queue model module, source code of queue model).
@@ -137,15 +127,7 @@ def queue_get_model_code(server_hwobj):
     # standard Python modules, so we only need to send over the code for the
     # queue model itself
 
-    queue_model_enumerables_code = inspect.getsource(queue_model_enumerables)
-
-    queue_model_objects_code = inspect.getsource(queue_model_objects)
-    queue_model_objects_code = queue_model_objects_code.replace(
-        "from mxcubecore import HardwareRepository as HWR",
-        "HWR = None  # HardwareRepository not available in this context",
-    )
-
     return [
-        (queue_model_enumerables.__name__, queue_model_enumerables_code),
-        (queue_model_objects.__name__, queue_model_objects_code),
+        (queue_model_enumerables.__name__, inspect.getsource(queue_model_enumerables)),
+        (queue_model_objects.__name__, inspect.getsource(queue_model_objects)),
     ]

@@ -1,6 +1,7 @@
+#! /usr/bin/env python
 # encoding: utf-8
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -25,11 +26,9 @@ Should be put as the first superclass,
 e.g. class MotorMockup(ActuatorMockup, AbstractMotor):
 """
 
-import random
 import time
-
+import random
 import gevent
-
 from mxcubecore.HardwareObjects.abstract import AbstractActuator
 
 __copyright__ = """ Copyright © 2010-2020 by the MXCuBE collaboration """
@@ -40,16 +39,16 @@ class ActuatorMockup(AbstractActuator.AbstractActuator):
     """Mock Motor implementation"""
 
     def __init__(self, name):
-        super().__init__(name)
+        super(ActuatorMockup, self).__init__(name)
         self.__move_task = None
 
     def init(self):
-        """Initialisation method"""
-        super().init()
+        """ Initialisation method """
+        super(ActuatorMockup, self).init()
         self.update_state(self.STATES.READY)
 
     def _move(self, value):
-        """Simulated value change - override as needed
+        """ Simulated value change - override as needed
 
         Must set specific_state as needed, take a non-zero amount of time
         call update_value for intermediate positions
@@ -82,8 +81,7 @@ class ActuatorMockup(AbstractActuator.AbstractActuator):
                              If timeout == 0: return at once and do not wait (default);
                              if timeout is None: wait forever.
         Raises:
-            ValueError: Value not valid or attempt to set read-only actuator.
-            RuntimeError: Timeout.
+            ValueError: Value not valid or attemp to set read-only actuator.
         """
         if self.read_only:
             raise ValueError("Attempt to set value for read-only Actuator")
@@ -91,7 +89,7 @@ class ActuatorMockup(AbstractActuator.AbstractActuator):
             self.update_state(self.STATES.BUSY)
             if timeout or timeout is None:
                 with gevent.Timeout(
-                    timeout, RuntimeError(f"Motor {self.username} timed out")
+                    timeout, RuntimeError("Motor %s timed out" % self.username)
                 ):
                     new_value = self._move(value)
                     self._set_value(new_value)
@@ -99,18 +97,19 @@ class ActuatorMockup(AbstractActuator.AbstractActuator):
                 self.__move_task = gevent.spawn(self._move, value)
                 self.__move_task.link(self._callback)
         else:
-            raise ValueError(f"Invalid value {value}; limits are {self.get_limits()}")
+            raise ValueError(
+                "Invalid value %s; limits are %s" % (value, self.get_limits())
+            )
 
     def abort(self):
-        """Immediately halt movement. By default self.stop = self.abort"""
+        """Imediately halt movement. By default self.stop = self.abort"""
         if self.__move_task is not None:
             self.__move_task.kill()
         self.update_state(self.STATES.READY)
 
     def _callback(self, move_task):
         value = move_task.get()
-        if not isinstance(value, gevent.GreenletExit):
-            self._set_value(value)
+        self._set_value(value)
 
     def _set_value(self, value):
         """

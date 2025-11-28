@@ -11,7 +11,7 @@ Beam size is hardcoded in this file.
 Beam Position is updated whenever the zoom motor changes position. Values taken from
    zoom xml configuration
 
-[Emitted signals]
+[Emited signals]
 
 beamInfoChanged
 beamPosChanged
@@ -20,12 +20,12 @@ beamPosChanged
 
 import logging
 
-from mxcubecore.BaseHardwareObjects import HardwareObject
+from mxcubecore.BaseHardwareObjects import Equipment
 
 
-class PX1BeamInfo(HardwareObject):
+class PX1BeamInfo(Equipment):
     def __init__(self, *args):
-        super().__init__(*args)
+        Equipment.__init__(self, *args)
 
         self.beam_position = [None, None]
         self.beam_size = [100, 100]
@@ -42,11 +42,12 @@ class PX1BeamInfo(HardwareObject):
         self.zoomMotor = None
 
     def init(self):
+
         try:
             self.beamx_chan = self.get_channel_object("beamsizex")
         except KeyError:
             logging.getLogger().warning(
-                "%s: cannot connect to beamsize x channel ", self.id
+                "%s: cannot connect to beamsize x channel ", self.name()
             )
 
         try:
@@ -54,7 +55,7 @@ class PX1BeamInfo(HardwareObject):
             self.beamy_chan.connect_signal("update", self.beamsize_x_changed)
         except KeyError:
             logging.getLogger().warning(
-                "%s: cannot connect to beamsize y channel ", self.id
+                "%s: cannot connect to beamsize y channel ", self.name()
             )
 
         self.zoomMotor = self.get_deviceby_role("zoom")
@@ -85,7 +86,7 @@ class PX1BeamInfo(HardwareObject):
                     self.beam_info_dict["size_x"] = self.beam_size[0] = float(beamx)
                     self.beam_info_dict["size_y"] = self.beam_size[1] = float(beamy)
             except Exception:
-                self.log.exception("")
+                pass
 
     def connect_notify(self, signal):
         if signal == "beamInfoChanged":

@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -20,6 +20,7 @@
 """BeamstopMockup"""
 
 from mxcubecore.BaseHardwareObjects import HardwareObject
+
 
 __credits__ = ["MXCuBE collaboration"]
 

@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -17,19 +17,13 @@
 #   You should have received a copy of the GNU Lesser General Public License
 #  along with MXCuBE. If not, see <http://www.gnu.org/licenses/>.
 
+import os
 import time
-
 import numpy as np
-from pkg_resources import resource_filename
 
-from mxcubecore.HardwareObjects.abstract.AbstractVideoDevice import AbstractVideoDevice
-from mxcubecore.utils.qt_import import (
-    QBrush,
-    QImage,
-    QPainter,
-    QPen,
-    QPixmap,
-    Qt,
+from mxcubecore.utils.qt_import import QPainter, QPixmap, QPen, QBrush, QImage, Qt
+from mxcubecore.HardwareObjects.abstract.AbstractVideoDevice import (
+    AbstractVideoDevice,
 )
 
 
@@ -41,10 +35,12 @@ class QtVideoMockup(AbstractVideoDevice):
         self.image = None
 
     def init(self):
-        default_image_path = resource_filename(
-            "mxcubecore", "configuration/mockup/qt/fakeimg.jpg"
-        )
+        current_path = os.path.dirname(os.path.abspath(__file__)).split(os.sep)
+        current_path = os.path.join(*current_path[1:-3])
+
+        default_image_path = "/" + current_path + "/test/fakeimg.jpg"
         image_path = self.get_property("file_name", default_image_path)
+
         self.image = QPixmap(image_path)
         self.image_dimensions = (self.image.width(), self.image.height())
         self.painter = QPainter(self.image)
@@ -58,6 +54,7 @@ class QtVideoMockup(AbstractVideoDevice):
         custom_brush.setColor(Qt.lightGray)
         self.painter.setBrush(custom_brush)
 
+        self.set_is_ready(True)
         AbstractVideoDevice.init(self)
 
     def get_new_image(self):

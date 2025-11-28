@@ -1,13 +1,12 @@
+from mxcubecore.BaseHardwareObjects import Device
 from SpecClient_gevent.SpecMotor import SpecMotorA
 
-from mxcubecore.BaseHardwareObjects import HardwareObject
 
-
-class SpecMotor(HardwareObject, SpecMotorA):
+class SpecMotor(Device, SpecMotorA):
     (NOTINITIALIZED, UNUSABLE, READY, MOVESTARTED, MOVING, ONLIMIT) = (0, 1, 2, 3, 4, 5)
 
     def __init__(self, name):
-        super().__init__(name)
+        Device.__init__(self, name)
         SpecMotorA.__init__(self)
 
     def _init(self):
@@ -54,7 +53,7 @@ class SpecMotor(HardwareObject, SpecMotorA):
 
 class SpecVersionMotor(SpecMotor):
     def __init__(self, specversion, specname, username):
-        super().__init__(specname)
+        Device.__init__(self, specname)
         self.specversion = specversion
         self.specname = specname
         self.username = username

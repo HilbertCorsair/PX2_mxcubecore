@@ -1,9 +1,7 @@
-import logging
 import sys
-
 import gevent
+import logging
 import PyTango.gevent
-
 from mxcubecore import BaseHardwareObjects
 from mxcubecore import HardwareRepository as HWR
 
@@ -44,7 +42,9 @@ class BlissHutchTrigger(BaseHardwareObjects.HardwareObject):
             self.device = PyTango.gevent.DeviceProxy(self.get_property("pss_tangoname"))
         except PyTango.DevFailed as traceback:
             last_error = traceback[-1]
-            self.log.error("%s: %s", str(self.name()), last_error["desc"])
+            logging.getLogger("HWR").error(
+                "%s: %s", str(self.name()), last_error["desc"]
+            )
             self.device = None
 
         self.pollingTask = None
@@ -58,8 +58,6 @@ class BlissHutchTrigger(BaseHardwareObjects.HardwareObject):
             self.card, self.channel = map(int, PSSinfo.split("/"))
         except Exception:
             logging.getLogger().error("%s: cannot find PSS number", self.name())
-
-            self.log.exception("")
             return
 
         if self.device is not None:
@@ -83,7 +81,7 @@ class BlissHutchTrigger(BaseHardwareObjects.HardwareObject):
 
     def macro(self, entering_hutch, **kwargs):
         logging.info(
-            "%s: %s hutch", self.id, "entering" if entering_hutch else "leaving"
+            "%s: %s hutch", self.name(), "entering" if entering_hutch else "leaving"
         )
         ctrl_obj = self.get_object_by_role("controller")
         ctrl_obj.hutch_actions(entering_hutch, hutch_trigger=True, **kwargs)

@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -20,44 +20,16 @@
 __copyright__ = """2019 by the MXCuBE collaboration """
 __license__ = "LGPLv3+"
 
-import base64
 import copy
 from functools import reduce
-from io import BytesIO
 
-import numpy as np
-from PIL import Image
+from mxcubecore.HardwareObjects import queue_model_objects
 
-from mxcubecore import HardwareRepository as HWR
 from mxcubecore.HardwareObjects.abstract.AbstractSampleView import (
     AbstractSampleView,
-    ShapeState,
 )
-from mxcubecore.model import queue_model_objects
 
-
-def combine_images(img1, img2):
-    if img1.size != img2.size:
-        raise ValueError("Images must be the same size")
-
-    combined_img = Image.new("RGB", img1.size)
-
-    pixels1 = img1.load()
-    pixels2 = img2.load()
-    combined_pixels = combined_img.load()
-
-    width, height = img1.size
-    for x in range(width):
-        for y in range(height):
-            pixel1 = pixels1[x, y]
-            pixel2 = pixels2[x, y]
-
-            if pixel2[0] <= 200 and pixel2[1] <= 60 and pixel2[2] <= 140:
-                combined_pixels[x, y] = pixel1
-            else:
-                combined_pixels[x, y] = pixel2
-
-    return combined_img
+from mxcubecore import HardwareRepository as HWR
 
 
 class SampleView(AbstractSampleView):
@@ -67,18 +39,15 @@ class SampleView(AbstractSampleView):
 
     def init(self):
         super(SampleView, self).init()
-        self._last_oav_image = None
+
+        self._camera = self.get_object_by_role("camera")
+        self._focus = self.get_object_by_role("focus")
+        self._zoom = self.get_object_by_role("zoom")
+        self._frontlight = self.get_object_by_role("frontlight")
+        self._backlight = self.get_object_by_role("backlight")
+        self._ui_snapshot_cb = None
 
         self.hide_grid_threshold = self.get_property("hide_grid_threshold", 5)
-        for motor_name, motor_ho in HWR.beamline.diffractometer.get_motors().items():
-            if motor_ho:
-                motor_ho.connect("stateChanged", self._update_shape_positions)
-
-    def _update_shape_positions(self, *args, **kwargs):
-        for shape in self.get_shapes():
-            shape.update_position(HWR.beamline.diffractometer.motor_positions_to_screen)
-
-        self.emit("shapesChanged")
 
     @property
     def shapes(self):
@@ -102,99 +71,48 @@ class SampleView(AbstractSampleView):
         """
         pass
 
-    def get_snapshot(self, overlay=None, bw=False, return_as_array=False):
-        """
-        Get snapshot(s)
+    def set_ui_snapshot_cb(self, fun):
+        self._ui_snapshot_cb = fun
 
+    def get_snapshot(self, overlay=True, bw=False, return_as_array=False):
+        """ Get snappshot(s)
         Args:
-            overlay(str): Image data with shapes and other items to display on the snapshot
+            overlay(bool): Display shapes and other items on the snapshot
             bw(bool): return grayscale image
             return_as_array(bool): return as np array
-
-        Returns:
-            (BytesIO) snapshot as bytes image
         """
-        img = self.take_snapshot(overlay_data=overlay, bw=bw)
+        pass
 
-        if return_as_array:
-            return np.array(img)
-
-        buffered = BytesIO()
-        img.save(buffered, format="JPEG")
-
-        return buffered
-
-    def save_snapshot(self, path, overlay=None, bw=False):
-        """
-        Save a snapshot to file.
-
+    def save_snapshot(self, path, overlay=True, bw=False):
+        """ Save a snapshot to file.
         Args:
-            path (str): The filename.
-            overlay(str): Image data with shapes and other items to display on the snapshot
+            filename (str): The filename.
+            overlay(bool): Display shapes and other items on the snapshot
             bw(bool): return grayscale image
         """
-        img = self.take_snapshot(overlay_data=overlay, bw=bw)
-        img.save(path)
-
-        self._last_oav_image = path
-
-    def take_snapshot(self, overlay_data=None, bw=False):
-        """
-        Get snapshot with overlaid data.
-
-        Args:
-            overlay_data (str): base64 encoded image to lay over camera image
-            bw (bool): return grayscale image
-
-        Returns:
-            (Image) rgb or grayscale image
-        """
-        data, width, height = self.camera.get_last_image()
-
-        img = Image.frombytes("RGB", (width, height), data)
-
-        if overlay_data:
-            overlay_data = base64.b64decode(overlay_data)
-            overlay_image = Image.open(BytesIO(overlay_data))
-            overlay_image = overlay_image.resize(
-                (width, height), Image.Resampling.LANCZOS
-            )
-            img = combine_images(img, overlay_image.convert("RGB"))
-
-        if bw:
-            img.convert("1")
-
-        return img
-
-    def get_last_image_path(self):
-        return self._last_oav_image
+        if overlay:
+            img = self._ui_snapshot_cb(path, bw)
+        else:
+            self.camera.take_snapshot(path, bw)
 
     def add_shape(self, shape):
         """
         Add the shape <shape> to the dictionary of handled shapes.
 
-        Args:
-            param (shape): Shape to add.
-            type (shape): Shape object.
+        :param shape: Shape to add.
+        :type shape: Shape object.
         """
         self.shapes[shape.id] = shape
         shape.shapes_hw_object = self
 
-    def add_shape_from_mpos(
-        self,
-        mpos_list,
-        screen_coord,
-        t,
-        state: ShapeState = "SAVED",
-        user_state: ShapeState = "SAVED",
-    ):
+    def add_shape_from_mpos(self, mpos_list, screen_coord, t):
         """
         Adds a shape of type <t>, with motor positions from mpos_list and
         screen position screen_coord.
 
         Args:
             mpos_list (list[mpos_list]): List of motor positions
-            screen_coord (tuple(x, y): Screen coordinate for shape
+            screen_coord (tuple(x, y): Screen cordinate for shape
             t (str): Type str for shape, P (Point), L (Line), G (Grid)
 
         Returns:
@@ -206,23 +124,17 @@ class SampleView(AbstractSampleView):
 
         if _cls:
             shape = _cls(mpos_list, screen_coord)
-            # In case the shape is being recreated, we need to restore it's state.
-            shape.state = state
-            shape.user_state = user_state
-
             self.add_shape(shape)
 
         return shape
 
-    def add_shape_from_refs(
-        self, refs, t, state: ShapeState = "SAVED", user_state: ShapeState = "SAVED"
-    ):
+    def add_shape_from_refs(self, refs, t):
         """
         Adds a shape of type <t>, taking motor positions and screen positions
         from reference points in refs.
 
         Args:
-            refs (list[str]): List of id's of the reference Points
+            refs (list[str]): List of id's of the refrence Points
             t (str): Type str for shape, P (Point), L (Line), G (Grid)
 
         Returns:
@@ -231,7 +143,7 @@ class SampleView(AbstractSampleView):
         mpos = [self.get_shape(refid).mpos() for refid in refs]
         spos_list = [self.get_shape(refid).screen_coord for refid in refs]
         spos = reduce((lambda x, y: tuple(x) + tuple(y)), spos_list, ())
-        shape = self.add_shape_from_mpos(mpos, spos, t, state, user_state)
+        shape = self.add_shape_from_mpos(mpos, spos, t)
         shape.refs = refs
 
         return shape
@@ -292,7 +204,7 @@ class SampleView(AbstractSampleView):
         Get all selected shapes.
 
         Returns:
-           (list[Shape]) List of selected Shapes
+           (list[Shape]) List fot selected Shapes
         """
         return [s for s in self.shapes.values() if s.is_selected()]
 
@@ -304,7 +216,7 @@ class SampleView(AbstractSampleView):
 
     def select_shape_with_cpos(self, cpos):
         """
-        Selects shape with the assocaitaed centered position <cpos>
+        Selects shape with the assocaitaed centerd posotion <cpos>
 
         Args:
             cpos (CenteredPosition)
@@ -386,7 +298,7 @@ class SampleView(AbstractSampleView):
         """
         return self.shapes.get(sid, None)
 
-    # For backwards compatibility with old ShapeHisotry object
+    # For backwards compatability with old ShapeHisotry object
     # returns first of selected grids
     def get_grid(self):
         """
@@ -405,37 +317,16 @@ class SampleView(AbstractSampleView):
 
         return grid
 
-    def set_grid_data(self, sid, result_data, data_file_path):
-        """
-        Sets grid rsult data for a shape with the specified id.
-
-        Args:
-            sid (str): The id of the shape to set grid data for.
-            result_data: The result data to set for the shape. Either a base64 encoded string for PNG/image
-            or a dictionary for RGB (keys are cell number and value RGBa list). Data is only updated if result is RGB based
-            data_file_path (str): The path to the data file associated with the result data.
-
-        Returns:
-            None
-
-        Raises:
-            AttributeError: If no shape with the specified id exists.
-        """
-
+    def set_grid_data(self, sid, result_data):
         shape = self.get_shape(sid)
 
         if shape:
-            if shape.result and type(shape.result) == dict:
-                # append data
-                shape.result.update(result_data)
-            else:
-                shape.set_result(result_data)
-                shape.result_data_path = data_file_path
-
+            shape.set_result(result_data)
             self.emit("newGridResult", shape)
         else:
             msg = "Cant set result for %s, no shape with id %s" % (sid, sid)
             raise AttributeError(msg)
+
 
     def get_grid_data(self, key):
         result = {}
@@ -471,8 +362,7 @@ class Shape(object):
         self.id = ""
         self.cp_list = []
         self.name = ""
-        self.state: ShapeState = "SAVED"
-        self.user_state: ShapeState = "SAVED"  # used to persist user preferences in regards whether to show or hide particular shape.
+        self.state = "SAVED"
         self.label = ""
         self.screen_coord = screen_coord
         self.selected = False
@@ -521,7 +411,7 @@ class Shape(object):
             self.screen_coord = screen_coord
 
     def update_from_dict(self, shape_dict):
-        # We don't allow id or result updates
+        # We dont allow id or result updates
         shape_dict.pop("id", None)
         shape_dict.pop("result", None)
 
@@ -562,7 +452,7 @@ class Point(Shape):
 
     def set_id(self, id_num):
         Shape.set_id(self, id_num)
-        self.cp_list[0].index = self.name
+        self.cp_list[0].index = self.id
 
     def as_dict(self):
         d = Shape.as_dict(self)
@@ -590,10 +480,6 @@ class Line(Shape):
         self.t = "L"
         self.label = "Line"
         self.set_id(Line.SHAPE_COUNT)
-
-    def set_id(self, id_num):
-        Shape.set_id(self, id_num)
-        self.cp_list[0].index = self.name
 
     def get_centred_positions(self):
         return [self.start_cpos, self.end_cpos]
@@ -623,9 +509,7 @@ class Grid(Shape):
         self.num_cols = -1
         self.num_rows = -1
         self.selected = False
-        # result is a base64 encoded string for PNG/image heatmap results
-        # or a dictionary (for RGB number based results)
-        self.result = None
+        self.result = []
         self.pixels_per_mm = [1, 1]
         self.beam_pos = [1, 1]
         self.beam_width = 0
@@ -635,14 +519,10 @@ class Grid(Shape):
         self.set_id(Grid.SHAPE_COUNT)
 
     def update_position(self, transform):
-        phi_pos = HWR.beamline.diffractometer.omega.get_value() % 360
-        _d = abs((self.get_centred_position().phi % 360) - phi_pos)
+        phi_pos = HWR.beamline.diffractometer.phiMotor.get_value() % 360
+        d = abs((self.get_centred_position().phi % 360) - phi_pos)
 
-        if self.user_state == "HIDDEN":
-            self.state = "HIDDEN"
-            return
-
-        if min(_d, 360 - _d) > self.shapes_hw_object.hide_grid_threshold:
+        if min(d, 360 - d) > self.shapes_hw_object.hide_grid_threshold:
             self.state = "HIDDEN"
         else:
             super(Grid, self).update_position(transform)
@@ -667,10 +547,11 @@ class Grid(Shape):
 
     def set_id(self, id_num):
         Shape.set_id(self, id_num)
-        self.cp_list[0].index = self.name
+        self.cp_list[0].index = self.id
 
     def set_result(self, result_data):
         self.result = result_data
+        self._result = result_data
 
     def get_result(self):
         return self.result
@@ -680,18 +561,19 @@ class Grid(Shape):
         # replace cpos_list with the motor positions
         d["motor_positions"] = self.cp_list[0].as_dict()
 
-        pixels_per_mm = HWR.beamline.diffractometer.get_pixels_per_mm()
-        beam_pos = HWR.beamline.beam.get_beam_position_on_screen()
-        size_x, size_y, shape, _label = HWR.beamline.beam.get_value()
-
-        d["x1"] = -float((beam_pos[0] - d["screen_coord"][0]) / pixels_per_mm[0])
-        d["y1"] = -float((beam_pos[1] - d["screen_coord"][1]) / pixels_per_mm[1])
+        # MXCuBE - 2 WF compatability
+        d["x1"] = -float(
+            (self.beam_pos[0] - d["screen_coord"][0]) / self.pixels_per_mm[0]
+        )
+        d["y1"] = -float(
+            (self.beam_pos[1] - d["screen_coord"][1]) / self.pixels_per_mm[1]
+        )
         d["steps_x"] = d["num_cols"]
         d["steps_y"] = d["num_rows"]
-        d["dx_mm"] = d["width"] / pixels_per_mm[0]
-        d["dy_mm"] = d["height"] / pixels_per_mm[1]
-        d["beam_width"] = size_x
-        d["beam_height"] = size_y
+        d["dx_mm"] = d["width"] / self.pixels_per_mm[0]
+        d["dy_mm"] = d["height"] / self.pixels_per_mm[1]
+        d["beam_width"] = d["beam_width"]
+        d["beam_height"] = d["beam_height"]
         d["angle"] = 0
 
         return d

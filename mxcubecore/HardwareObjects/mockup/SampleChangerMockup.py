@@ -1,17 +1,20 @@
-import logging
+import gevent
+from datetime import datetime
 import time
+import logging
 
 from mxcubecore.HardwareObjects.abstract import AbstractSampleChanger
 from mxcubecore.HardwareObjects.abstract.sample_changer import Container
 
 
 class SampleChangerMockup(AbstractSampleChanger.SampleChanger):
+
     __TYPE__ = "Mockup"
     NO_OF_BASKETS = 5
     NO_OF_SAMPLES_IN_BASKET = 10
 
-    def __init__(self, name):
-        super(SampleChangerMockup, self).__init__(self.__TYPE__, False, name)
+    def __init__(self, *args, **kwargs):
+        super(SampleChangerMockup, self).__init__(self.__TYPE__, False, *args, **kwargs)
 
     def init(self):
         self._selected_sample = -1
@@ -41,9 +44,11 @@ class SampleChangerMockup(AbstractSampleChanger.SampleChanger):
     def get_log_filename(self):
         return self.log_filename
 
+    def load_sample(self, holder_length, sample_location=None, wait=False):
+        self.load(sample_location, wait)
+
     def load(self, sample, wait=False):
         self.emit("fsmConditionChanged", "sample_mounting_sample_changer", True)
-        previous_sample = self.get_loaded_sample()
         self._set_state(AbstractSampleChanger.SampleChangerState.Loading)
         self._reset_loaded_sample()
 
@@ -52,10 +57,10 @@ class SampleChangerMockup(AbstractSampleChanger.SampleChanger):
         else:
             basket, sample = sample.split(":")
 
-        self._selected_basket = basket = int(basket)
-        self._selected_sample = sample = int(sample)
+        self._selected_basket = int(basket)
+        self._selected_sample = int(sample)
 
-        msg = "Loading sample %d:%d" % (basket, sample)
+        msg = "Loading sample %d:%d" % (int(basket), int(sample))
         logging.getLogger("user_level_log").info(
             "Sample changer: %s. Please wait..." % msg
         )
@@ -68,10 +73,10 @@ class SampleChangerMockup(AbstractSampleChanger.SampleChanger):
         mounted_sample = self.get_component_by_address(
             Container.Pin.get_sample_address(basket, sample)
         )
+        mounted_sample._set_loaded(True, False)
         self._set_state(AbstractSampleChanger.SampleChangerState.Ready)
 
-        if mounted_sample is not previous_sample:
-            self._trigger_loaded_sample_changed_event(mounted_sample)
+        self._set_loaded_sample(mounted_sample)
         self.update_info()
         logging.getLogger("user_level_log").info("Sample changer: Sample loaded")
         self.emit("progressStop", ())
@@ -137,9 +142,9 @@ class SampleChangerMockup(AbstractSampleChanger.SampleChanger):
         :rtype: None
         """
         named_samples = {}
-        dd1 = self.get_property("test_sample_names")
-        if dd1:
-            named_samples.update(dd1)
+        if self.has_object("test_sample_names"):
+            for tag, val in self["test_sample_names"].get_properties().items():
+                named_samples[val] = tag
 
         for basket_index in range(self.no_of_baskets):
             basket = self.get_components()[basket_index]
@@ -173,6 +178,3 @@ class SampleChangerMockup(AbstractSampleChanger.SampleChanger):
             sample._set_holder_length(spl[4])
 
         self._set_state(AbstractSampleChanger.SampleChangerState.Ready)
-
-    def is_powered(self):
-        return True

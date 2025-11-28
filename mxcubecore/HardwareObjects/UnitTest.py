@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -18,9 +18,8 @@
 #  along with MXCuBE. If not, see <http://www.gnu.org/licenses/>.
 
 
-import logging
 import unittest
-
+import logging
 from mxcubecore.BaseHardwareObjects import HardwareObject
 
 BEAMLINE = None

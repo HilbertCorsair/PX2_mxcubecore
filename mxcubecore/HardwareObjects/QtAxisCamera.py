@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -17,26 +17,33 @@
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with MXCuBE. If not, see <http://www.gnu.org/licenses/>.
 
-import base64
+import os
 import time
-
-import numpy as np
+import Image
+import base64
 import urllib2
 
-from mxcubecore.HardwareObjects.abstract.AbstractVideoDevice import AbstractVideoDevice
+import numpy as np
+
+from cStringIO import StringIO
+from PIL.ImageQt import ImageQt
+
 from mxcubecore.utils import qt_import
+from mxcubecore.HardwareObjects.abstract.AbstractVideoDevice import (
+    AbstractVideoDevice,
+)
 
 """
-Hardware objects allows to access Axis camera jpg frames via direct http requests.
+Hardare objects allows to access Axis camera jpg frames via direct http requests.
 
 Example xml:
-<object class="AxisCamera">
+<device class="AxisCamera">
    <interval>1000</interval>
    <address>ADDRESS_OF_THE_CAMERA/axis-cgi/jpg/image.cgi</address>
    <user>USER</user>
    <password>PASSWORD</password>
    <image_size>(600, 480)</image_size>
-</object>
+</device>
 """
 
 

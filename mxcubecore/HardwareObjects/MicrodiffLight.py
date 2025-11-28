@@ -1,10 +1,16 @@
 from mxcubecore.HardwareObjects.ExporterMotor import ExporterMotor
+from mxcubecore.BaseHardwareObjects import HardwareObjectState
 
+try:
+    from goniometer import goniometer
+except ModuleNotFoundError:
+    from experimental_methods import goniometer
 
 class MicrodiffLight(ExporterMotor):
     def __init__(self, name):
         ExporterMotor.__init__(self, name)
         self._motor_pos_suffix = "Level"
+        self.goniometer = goniometer()
 
     def init(self):
         ExporterMotor.init(self)
@@ -14,14 +20,13 @@ class MicrodiffLight(ExporterMotor):
         except (AttributeError, TypeError, ValueError):
             self._limits = (0, 10)
         self.chan_light_is_on = self.get_channel_object("chanLightIsOn")
-        self.update_state(self.STATES.READY)
-
+        
     def get_state(self):
         """Get the light state as a motor.
         Returns:
             (enum 'HardwareObjectState'): Light state.
         """
-        return self._state
+        return HardwareObjectState.READY
 
     def get_limits(self):
         return self._limits
@@ -30,16 +35,14 @@ class MicrodiffLight(ExporterMotor):
         return self.chan_light_is_on.get_value()
 
     def move_in(self):
-        self.chan_light_is_on.set_value(True)
+        #self.chan_light_is_on.set_value(True)
+        self.goniometer.insert_backlight()
 
     def move_out(self):
         self.chan_light_is_on.set_value(False)
 
-    def _set_value(self, value):
-        """Move motor to absolute value.
-        Args:
-            value (float): target value
-        """
-        self.update_state(self.STATES.BUSY)
-        self.motor_position_chan.set_value(value)
-        self.update_state(self.STATES.READY)
+    def get_value(self):
+        return self.motor_position.get_value()
+    
+    def update_state(self, state=None):
+        self.emit('stateChanged', self.get_state())

@@ -1,9 +1,10 @@
-import os
-import sys
-import time
-
-from xaloc import XalocJob
 from XSDataMXCuBEv1_3 import XSDataResultMXCuBE
+from xaloc import XalocJob
+import os
+import time
+import logging
+
+import sys
 
 sys.path.append("/beamlines/bl13/controls/devel/pycharm/ALBAClusterClient")
 
@@ -19,6 +20,7 @@ class ALBAClusterJob(object):
         pass
 
     def wait_done(self, wait=True):
+
         if not self.job:
             return
 
@@ -30,11 +32,11 @@ class ALBAClusterJob(object):
             return state
 
         while state in ["RUNNING", "PENDING"]:
-            self.log.debug("Job / is %s" % state)
+            logging.getLogger("HWR").debug("Job / is %s" % state)
             time.sleep(0.5)
             state = self.job.state
 
-        self.log.debug(' job finished with state: "%s"' % state)
+        logging.getLogger("HWR").debug(' job finished with state: "%s"' % state)
         return state
 
     def get_result(self, state):
@@ -45,6 +47,7 @@ class ALBAAutoprocJob(ALBAClusterJob):
     sls_script = os.path.join(root, "edna-mx/autoproc/edna-mx.autoproc.sl")
 
     def run(self, *args):
+
         jobname = os.path.basename(os.path.dirname(edna_directory))
         self.job = XalocJob(
             "edna-autoproc", jobname, self.sls_script, input_file, edna_directory
@@ -64,10 +67,12 @@ class ALBAEdnaProcJob(ALBAClusterJob):
 
 
 class ALBAStrategyJob(ALBAClusterJob):
+
     sls_script = os.path.join(root, "edna-mx/strategy/edna-mx.strategy.sl")
 
     def run(self, *args):
-        self.log.debug("Starting StrategyJob - ")
+
+        logging.getLogger("HWR").debug("Starting StrategyJob - ")
 
         input_file, results_file, edna_directory = args
 
@@ -78,13 +83,13 @@ class ALBAStrategyJob(ALBAClusterJob):
         )
         self.job.submit()
 
-        self.log.debug("         StrategyJob - %s" % str(self.job))
+        logging.getLogger("HWR").debug("         StrategyJob - %s" % str(self.job))
 
         self.edna_directory = os.path.dirname(input_file)
         self.results_file = results_file
 
-        self.log.debug("  input file: %s" % input_file)
-        self.log.debug("  edna directory: %s" % self.edna_directory)
+        logging.getLogger("HWR").debug("  input file: %s" % input_file)
+        logging.getLogger("HWR").debug("  edna directory: %s" % self.edna_directory)
 
     def get_result(self, state):
         if state == "COMPLETED":
@@ -92,19 +97,19 @@ class ALBAStrategyJob(ALBAClusterJob):
                 self.edna_directory, "ControlInterfaceToMXCuBEv1_3_dataOutput.xml"
             )
 
-            self.log.debug("Job / state is COMPLETED")
-            self.log.debug("  looking for file: %s" % outfile)
+            logging.getLogger("HWR").debug("Job / state is COMPLETED")
+            logging.getLogger("HWR").debug("  looking for file: %s" % outfile)
             if os.path.exists(outfile):
                 job_output = open(outfile).read()
                 open(self.results_file, "w").write(job_output)
                 result = XSDataResultMXCuBE.parseFile(self.results_file)
             else:
-                self.log.debug(
+                logging.getLogger("HWR").debug(
                     "EDNA Job finished without success / cannot find output file "
                 )
                 result = ""
         else:
-            self.log.debug(
+            logging.getLogger("HWR").debug(
                 "EDNA Job finished without success / state was %s" % (job.state)
             )
             result = ""

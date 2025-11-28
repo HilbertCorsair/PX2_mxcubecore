@@ -1,6 +1,6 @@
 # encoding: utf-8
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -18,34 +18,25 @@
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with MXCuBE. If not, see <http://www.gnu.org/licenses/>.
 
-"""BlissShutter class - interface for shutter controlled by BLISS
+""" BlissShutter class - interface for shutter controlled by BLISS
 Implements _set_value, get_value methods
 Bliss states are: UNKNOWN, OPEN, CLOSED, FAULT
 "MOVING", "DISABLE", "STANDBY", "RUNNING"
-Example yml configuration:
-
-.. code-block:: yaml
-
- class: BlissShutter.BlissShutter
- configuration:
-   actuator_name: safshut
-   type: tango
-   username: Safety shutter
- objects:
-   controller: bliss.yaml
+Example xml file:
+<devic class="BlissShutter">
+  <username>Safety Shutter</username>
+  <name>safshut</name>
+  <type>tango</type>
+  <object href="/bliss" role="controller"/>
+</device>
 """
-
-from enum import (
-    Enum,
-    unique,
-)
-
+from enum import Enum, unique
 import gevent
-
-from mxcubecore.BaseHardwareObjects import HardwareObjectState
 from mxcubecore.HardwareObjects.abstract.AbstractShutter import AbstractShutter
 
-__copyright__ = """ Copyright © by the MXCuBE collaboration """
+from mxcubecore.BaseHardwareObjects import HardwareObjectState
+
+__copyright__ = """ Copyright © 2020 by the MXCuBE collaboration """
 __license__ = "LGPLv3+"
 
 
@@ -63,21 +54,21 @@ class BlissShutterStates(Enum):
 
 
 class BlissShutter(AbstractShutter):
-    """BLISS implementation of AbstractShutter"""
+    """BLISS implementation of AbstractShutter """
 
     SPECIFIC_STATES = BlissShutterStates
 
     def __init__(self, name):
-        super().__init__(name)
+        AbstractShutter.__init__(self, name)
         self._bliss_obj = None
         self.shutter_type = None
         self.opening_mode = None
 
     def init(self):
-        """Initialise the predefined values"""
-        self.controller = self.get_object_by_role("controller")
-        super().init()
-        self._bliss_obj = getattr(self.controller, self.actuator_name)
+        """Initilise the predefined values"""
+        AbstractShutter.init(self)
+        _name = self.get_property("name")
+        self._bliss_obj = getattr(self.get_object_by_role("controller"), _name)
         # for now we only treat tango type shutter
         self.shutter_type = self.get_property("type", "tango")
         try:
@@ -98,7 +89,7 @@ class BlissShutter(AbstractShutter):
             gevent.sleep(0.5)
 
     def _initialise_values(self):
-        """Add the tango states to VALUES"""
+        """ Add the tango states to VALUES"""
         values_dict = {item.name: item.value for item in self.VALUES}
         values_dict.update(
             {
@@ -140,7 +131,7 @@ class BlissShutter(AbstractShutter):
         """Set automatic or manual mode for a Frontend shutter
         Args:
             value (str): MANUAL or AUTOMATIC
-        Raises: NotImplementedError: Not a Frontend shutter.
+        Raises: NotImplementedError: Not a Fronend shutter.
         """
         self._bliss_obj.mode = value
         self.opening_mode = value

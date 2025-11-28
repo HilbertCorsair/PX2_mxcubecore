@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -22,7 +22,7 @@ The BeamSlitBox Hardware Object is used to operate slits.
 
 Example Hardware Object XML file :
 ==================================
-<object class="BeamSlitBox">
+<equipment class="BeamSlitBox">
     <focModeEq>/beamFocusing</focModeEq>             - focusing mode equipment
     <focModes>['Collimated', 'Horizontal', 'Vertical', 'Double']</focModes>
                                                      - used focusing modes
@@ -64,11 +64,14 @@ Example Hardware Object XML file :
           </motor>
        </motors>
     </gapV>
-    <object hwrid="/attocubeMotors/attoGroup" role="attocubeMotors"/>
-</object>
+    <device hwrid="/attocubeMotors/attoGroup" role="attocubeMotors"/>
+</equipment>
 """
 
+import logging
+
 from mxcubecore.HardwareObjects.abstract.AbstractSlits import AbstractSlits
+
 
 __credits__ = ["EMBL Hamburg"]
 __license__ = "LGPLv3+"
@@ -77,15 +80,15 @@ __category__ = "Motor"
 
 class EMBLSlitBox(AbstractSlits):
     """User can define sizes of horizontal and verstical slits by
-    entering direct size and pressing Enter or by using up and
-    down buttons. Slits operations are enabled accordingly to
-    the detected focusing mode.
-       - Collimated beam (both enabled)
-       - Horizontally focused (hor. disabled and ver. enabled)
-       - Vertically focused (hor. enabled and ver. disabled)
-       - Double focused (both disabled)
-    User can stop slit movement by pressing stop button
-    (enabled if slits moves).
+       entering direct size and pressing Enter or by using up and
+       down buttons. Slits operations are enabled accordingly to
+       the detected focusing mode.
+          - Collimated beam (both enabled)
+          - Horizontally focused (hor. disabled and ver. enabled)
+          - Vertically focused (hor. enabled and ver. disabled)
+          - Double focused (both disabled)
+       User can stop slit movement by pressing stop button
+       (enabled if slits moves).
     """
 
     def __init__(self, *args):
@@ -152,22 +155,26 @@ class EMBLSlitBox(AbstractSlits):
             )
             self.beam_focus_hwobj.re_emit_values()
         else:
-            self.log.debug("EMBLSlitBox: beamFocus HO not defined")
+            logging.getLogger("HWR").debug("EMBLSlitBox: beamFocus HO not defined")
 
     def get_step_sizes(self):
-        """Returns Hor and Ver step sizes (list of two values)"""
+        """Returns Hor and Ver step sizes (list of two values)
+        """
         return [self.gaps_dict["Hor"]["stepSize"], self.gaps_dict["Ver"]["stepSize"]]
 
     def get_min_limits(self):
-        """Returns min Hor and Ver gaps values (list of two values)"""
+        """Returns min Hor and Ver gaps values (list of two values)
+        """
         return [self.gaps_dict["Hor"]["minGap"], self.gaps_dict["Ver"]["minGap"]]
 
     def get_max_limits(self):
-        """Returns max Hor and Ver gaps values (list of two values)"""
+        """Returns max Hor and Ver gaps values (list of two values)
+        """
         return [self.gaps_dict["Hor"]["maxGap"], self.gaps_dict["Ver"]["maxGap"]]
 
     def get_gap_limits(self, gap_name):
-        """Returns gap min and max limits (list of two values)"""
+        """Returns gap min and max limits (list of two values)
+        """
         return [self.gaps_dict[gap_name]["minGap"], self.gaps_dict[gap_name]["maxGap"]]
 
     def change_motor_position(self, motor_name, position):
@@ -188,9 +195,9 @@ class EMBLSlitBox(AbstractSlits):
         for motor in new_status_dict:
             if motor in self.motors_dict:
                 self.motors_dict[motor]["status"] = new_status_dict[motor]
-                self.gaps_dict[self.motors_dict[motor]["gap"]]["status"] = (
-                    new_status_dict[motor]
-                )
+                self.gaps_dict[self.motors_dict[motor]["gap"]][
+                    "status"
+                ] = new_status_dict[motor]
         self.emit(
             "statusChanged",
             ((self.gaps_dict["Hor"]["status"], self.gaps_dict["Ver"]["status"]),),
@@ -224,7 +231,7 @@ class EMBLSlitBox(AbstractSlits):
             + self.motors_dict["Out"]["position"]
             - self.motors_dict["Out"]["reference"]
         )
-        return -gap / (10**self.decimal_places)
+        return -gap / (10 ** self.decimal_places)
 
     def get_vertical_gap(self):
         """Evaluates Vertical gap"""
@@ -234,7 +241,7 @@ class EMBLSlitBox(AbstractSlits):
             + self.motors_dict["But"]["position"]
             - self.motors_dict["But"]["reference"]
         )
-        return -gap / (10**self.decimal_places)
+        return -gap / (10 ** self.decimal_places)
 
     def get_gaps(self):
         """Returns horizontala and vertical gap values"""
@@ -267,11 +274,11 @@ class EMBLSlitBox(AbstractSlits):
                 if self.motors_dict[motor]["gap"] == gap_name:
                     if new_gap > old_gap:
                         new_position = self.motors_dict[motor]["position"] - float(
-                            (new_gap - old_gap) / 2 * (10**self.decimal_places)
+                            (new_gap - old_gap) / 2 * (10 ** self.decimal_places)
                         )
                     else:
                         new_position = self.motors_dict[motor]["position"] + float(
-                            (old_gap - new_gap) / 2 * (10**self.decimal_places)
+                            (old_gap - new_gap) / 2 * (10 ** self.decimal_places)
                         )
                     for motor_group in self.motors_groups:
                         if (
@@ -306,7 +313,7 @@ class EMBLSlitBox(AbstractSlits):
                         motors_group.stop_motor(motor["motorName"])
 
     def set_focus_mode(self, focus_mode):
-        """Sets motors in positions according to focusing mode"""
+        """Sets motors in possitions according to focusing mode"""
         self.active_focus_mode = focus_mode
         for motor in self.motors_dict:
             for motors_group in self.motors_groups_devices:

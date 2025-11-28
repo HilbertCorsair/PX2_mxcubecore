@@ -1,6 +1,6 @@
 # encoding: utf-8
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -37,7 +37,7 @@ Implemented methods:
     get_binning_mode, set_binning_mode
 Implemented propertries:
     distance
-Emitted signals:
+Emited signals:
     detectorRoiModeChanged
     temperatureChanged
     humidityChanged
@@ -49,11 +49,11 @@ Hardware objects used: energy
 """
 
 import abc
-import ast
 import math
+import ast
 
+from mxcubecore import HardwareRepository as HWR
 from mxcubecore.BaseHardwareObjects import HardwareObject
-from mxcubecore.model.queue_model_objects import PathTemplate
 
 __copyright__ = """ Copyright © 2019 by the MXCuBE collaboration """
 __license__ = "LGPLv3+"
@@ -65,32 +65,32 @@ class AbstractDetector(HardwareObject):
     __metaclass__ = abc.ABCMeta
 
     def __init__(self, name):
-        super().__init__(name)
+        HardwareObject.__init__(self, name)
 
         self._temperature = None
         self._humidity = None
         self._actual_frame_rate = None
-        self._pixel_size = (None, None)
-        self._binning_mode = None
-        self._roi_mode = 0
-        self._images_per_file = 0
-        self._roi_modes_list = []
         self._exposure_time_limits = (None, None)
+
+        self._pixel_size = (None, None)
+
+        self._binning_mode = 0
+        self._roi_mode = 0
+        self._roi_modes_list = []
 
         self._threshold_energy = None
         self._distance_motor_hwobj = None
-
         self._width = None  # [pixel]
         self._height = None  # [pixel]
         self._metadata = {}
 
     def init(self):
-        """Initialise some common parameters"""
-        super().init()
+        """Initialise some common paramerters"""
 
-        self._metadata = self.get_property("beam", {})
-
-        self._images_per_file = self.get_property("images_per_file", 100)
+        try:
+            self._metadata = dict(self["beam"].get_properties())
+        except KeyError:
+            pass
 
         self._distance_motor_hwobj = self.get_object_by_role("detector_distance")
 
@@ -100,26 +100,9 @@ class AbstractDetector(HardwareObject):
         self._width = self.get_property("width")
         self._height = self.get_property("height")
 
-        min_exp_time = self.get_property("minimum_exposure_time", None)
-        max_exp_time = self.get_property("maximum_exposure_time", None)
-
-        if min_exp_time is None:
-            self.log.warning("Minimum exposure time not set for detector, using None")
-        else:
-            min_exp_time = float(min_exp_time)
-
-        if max_exp_time is None:
-            self.log.warning("Maximum exposure time not set for detector, using None")
-        else:
-            max_exp_time = float(max_exp_time)
-
-        self._exposure_time_limits = (
-            min_exp_time,
-            max_exp_time,
-        )
-
     def force_emit_signals(self):
-        """Emit all hardware object signals."""
+        """Emit all hardware object signals.
+        """
         self.emit("detectorRoiModeChanged", (self._roi_mode,))
         self.emit("temperatureChanged", (self._temperature, True))
         self.emit("humidityChanged", (self._humidity, True))
@@ -127,10 +110,6 @@ class AbstractDetector(HardwareObject):
         self.emit("frameRateChanged", (self._actual_frame_rate,))
         self.emit("stateChanged", (self._state,))
         self.emit("specificStateChanged", (self._specific_state,))
-
-    @property
-    def images_per_file(self):
-        return self._images_per_file
 
     @property
     def distance(self):
@@ -163,10 +142,12 @@ class AbstractDetector(HardwareObject):
 
     @abc.abstractmethod
     def start_acquisition(self):
-        """Start the acquisition."""
+        """Start the acquisition.
+        """
 
     def stop_acquisition(self):
-        """Stop the acquisition."""
+        """Stop the acquisition.
+        """
 
     def get_roi_mode(self):
         """Get the current ROI mode.
@@ -225,7 +206,7 @@ class AbstractDetector(HardwareObject):
         """
         self._binning_mode = value
 
-    def get_beam_position(self, distance=None, wavelength=None):  # noqa: ARG002
+    def get_beam_position(self, distance=None, wavelength=None):
         """Calculate the beam position for a given distance.
         Args:
             distance (float): detector distance [mm]
@@ -240,12 +221,8 @@ class AbstractDetector(HardwareObject):
         # wavelength
 
         try:
-            distance = (
-                distance
-                if distance is not None
-                else self._distance_motor_hwobj.get_value()
-            )
-
+            distance = distance or self._distance_motor_hwobj.get_value()
+            wavelength = wavelength or HWR.beamline.energy.get_wavelength()
             metadata = self.get_metadata()
 
             beam_position = (
@@ -265,13 +242,9 @@ class AbstractDetector(HardwareObject):
             (float): Detector radius [mm]
         """
         try:
-            distance = (
-                distance
-                if distance is not None
-                else self._distance_motor_hwobj.get_value()
-            )
-        except AttributeError as err:
-            raise RuntimeError("Cannot calculate radius, unknown distance") from err
+            distance = distance or self._distance_motor_hwobj.get_value()
+        except AttributeError:
+            raise RuntimeError("Cannot calculate radius, distance unknown")
 
         beam_x, beam_y = self.get_beam_position(distance)
         pixel_x, pixel_y = self.get_pixel_size()
@@ -289,21 +262,13 @@ class AbstractDetector(HardwareObject):
             (float): Detector outer adius [mm]
         """
         try:
-            distance = (
-                distance
-                if distance is not None
-                else self._distance_motor_hwobj.get_value()
-            )
-        except AttributeError as err:
-            raise RuntimeError(
-                "Cannot calculate outer radius, distance unknown"
-            ) from err
-
+            distance = distance or self._distance_motor_hwobj.get_value()
+        except AttributeError:
+            raise RuntimeError("Cannot calculate outer radius, distance unknown")
         beam_x, beam_y = self.get_beam_position(distance)
         pixel_x, pixel_y = self.get_pixel_size()
-        max_delta_x = max(beam_x, self._width - beam_x) * pixel_x
-        max_delta_y = max(beam_y, self._height - beam_y) * pixel_y
-
+        max_delta_x = max(beam_x, self.width - beam_x) * pixel_x
+        max_delta_y = max(beam_y, self.height - beam_y) * pixel_y
         return math.sqrt(max_delta_x * max_delta_x + max_delta_y * max_delta_y)
 
     def get_metadata(self):
@@ -343,31 +308,3 @@ class AbstractDetector(HardwareObject):
             (float): Detector threshold energy [eV]
         """
         return self._threshold_energy
-
-    def get_image_file_name(self, path_template, suffix=None):
-        template = "%s_%s_%%0" + str(path_template.precision) + "d.%s"
-        suffix = suffix or path_template.suffix
-        file_name = template % (
-            path_template.get_prefix(),
-            path_template.run_number,
-            suffix,
-        )
-        if path_template.compression:
-            file_name = "%s.gz" % file_name
-
-        return file_name
-
-    def get_first_and_last_file(self, pt: PathTemplate):
-        """
-        Get complete path to first and last image
-
-        Args:
-          pt (PathTempalte): Path template parameter
-
-        Returns:
-        (Tuple): Tuple containing first and last image path (first, last)
-        """
-        start_num = pt.start_num
-        end_num = pt.start_num + pt.num_files - 1
-
-        return (pt.get_image_path() % start_num, pt.get_image_path() % end_num)

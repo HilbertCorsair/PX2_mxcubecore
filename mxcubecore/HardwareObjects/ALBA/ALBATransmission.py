@@ -1,9 +1,10 @@
-from mxcubecore.BaseHardwareObjects import HardwareObject
+from mxcubecore import HardwareRepository as HWR
+from mxcubecore.BaseHardwareObjects import Device
 
 
-class ALBATransmission(HardwareObject):
+class ALBATransmission(Device):
     def __init__(self, *args):
-        super().__init__(*args)
+        Device.__init__(self, *args)
         self.transmission = None
 
     def init(self):

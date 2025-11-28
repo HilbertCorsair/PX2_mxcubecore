@@ -1,13 +1,15 @@
 import logging
+import gevent
 import time
 
-import gevent
-
+from mxcubecore.HardwareObjects.GenericDiffractometer import (
+    GenericDiffractometer,
+)
 from mxcubecore.HardwareObjects import sample_centring
-from mxcubecore.HardwareObjects.GenericDiffractometer import GenericDiffractometer
 
 
 class PX1MiniDiff(GenericDiffractometer):
+
     CENTRING_MOTORS_NAME = [
         "phi",
         "phiz",
@@ -54,14 +56,16 @@ class PX1MiniDiff(GenericDiffractometer):
                 if env_state != "RUNNING" and self.px1env_ho.isPhaseVisuSample():
                     break
                 if time.time() - t0 > timeout:
-                    self.log.debug("timeout sending supervisor to sample view phase")
+                    logging.getLogger("HWR").debug(
+                        "timeout sending supervisor to sample view phase"
+                    )
                     break
                 gevent.sleep(0.1)
 
         self.lightarm_hwobj.adjustLightLevel()
 
     def smargon_state_changed(self, value):
-        self.log.debug("smargon state changed")
+        logging.getLogger("HWR").debug("smargon state changed")
         self.smargon_state = value
         self.emit("minidiffStateChanged", (value,))
 
@@ -76,7 +80,8 @@ class PX1MiniDiff(GenericDiffractometer):
         return GenericDiffractometer.get_pixels_per_mm(self)
 
     def update_zoom_calibration(self):
-        """ """
+        """
+        """
         if "zoom" not in self.motor_hwobj_dict:
             # not initialized yet
             return
@@ -102,9 +107,10 @@ class PX1MiniDiff(GenericDiffractometer):
             )
 
     def px1_manual_centring(self, sample_info=None, wait_result=None):
-        """ """
+        """
+        """
         self.emit_progress_message("Manual 3 click centring...")
-        self.log.debug(
+        logging.getLogger("HWR").debug(
             "   starting manual 3 click centring. phiy is %s" % str(self.centring_phiy)
         )
 
@@ -135,7 +141,7 @@ class PX1MiniDiff(GenericDiffractometer):
         """
         Descript. :
         """
-        self.log.debug("Diffractometer: centring procedure done.")
+        logging.getLogger("HWR").debug("Diffractometer: centring procedure done.")
         try:
             motor_pos = centring_procedure.get()
             if isinstance(motor_pos, gevent.GreenletExit):
@@ -144,11 +150,15 @@ class PX1MiniDiff(GenericDiffractometer):
             logging.exception("Could not complete centring")
             self.emit_centring_failed()
         else:
-            self.log.debug("Diffractometer: centring procedure done. %s" % motor_pos)
+            logging.getLogger("HWR").debug(
+                "Diffractometer: centring procedure done. %s" % motor_pos
+            )
 
             for motor in motor_pos:
                 position = motor_pos[motor]
-                self.log.debug("   - motor is %s - going to %s" % (motor.id, position))
+                logging.getLogger("HWR").debug(
+                    "   - motor is %s - going to %s" % (motor.name(), position)
+                )
 
             self.emit_progress_message("Moving sample to centred position...")
             self.emit_centring_moving()
@@ -176,7 +186,8 @@ class PX1MiniDiff(GenericDiffractometer):
             self.ready_event.set()
 
     def move_to_motors_positions(self, motors_positions, wait=False):
-        """ """
+        """
+        """
         self.emit_progress_message("Moving to motors positions...")
         self.move_to_motors_positions_procedure = gevent.spawn(
             self.move_motors, motors_positions
@@ -199,18 +210,22 @@ class PX1MiniDiff(GenericDiffractometer):
                             and target values.
         :type motors_dict: dict
         """
-        from mxcubecore.model.queue_model_objects import CentredPosition
+        from mxcubecore.HardwareObjects.queue_model_objects import (
+            CentredPosition,
+        )
 
         if isinstance(motor_positions, CentredPosition):
             motor_positions_copy = motor_positions.as_dict()
         else:
-            # We do not want to modify the input dict
+            # We do not want ot modify teh input dict
             motor_positions_copy = motor_positions.copy()
 
-        self.log.debug("MiniDiff moving motors. %s" % str(motor_positions_copy))
+        logging.getLogger("HWR").debug(
+            "MiniDiff moving motors. %s" % str(motor_positions_copy)
+        )
 
         self.wait_device_ready(timeout)
-        self.log.debug("   now ready to move them")
+        logging.getLogger("HWR").debug("   now ready to move them")
         for motor in motor_positions_copy.keys():
             position = motor_positions_copy[motor]
             if type(motor) in (str, unicode):
@@ -221,15 +236,19 @@ class PX1MiniDiff(GenericDiffractometer):
                     continue
                 motor_positions_copy[motor] = position
 
-            self.log.debug("  / moving motor. %s to %s" % (motor.id, position))
+            logging.getLogger("HWR").debug(
+                "  / moving motor. %s to %s" % (motor.name(), position)
+            )
             self.wait_device_ready(timeout)
             try:
                 motor.set_value(position, timeout=None)
             except Exception:
-                self.log.debug(
+                import traceback
+
+                logging.getLogger("HWR").debug(
                     "  / error moving motor on diffractometer. state is %s"
                     % (self.smargon_state)
                 )
-                self.log.exception("")
+                logging.getLogger("HWR").debug("     / %s " % traceback.format_exc())
 
         self.wait_device_ready(timeout)

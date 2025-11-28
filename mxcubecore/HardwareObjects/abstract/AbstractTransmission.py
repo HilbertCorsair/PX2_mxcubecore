@@ -1,6 +1,6 @@
 # encoding: utf-8
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -18,29 +18,32 @@
 #  You should have received a copy of the GNU General Lesser Public License
 #  along with MXCuBE. If not, see <http://www.gnu.org/licenses/>.
 
-"""Abstract Transmission
-Set the unit as [%] and the limits to 0-100.
-"""
+"""Abstract Transmission"""
 
 import abc
+from mxcubecore.HardwareObjects.abstract.AbstractActuator import (
+    AbstractActuator,
+)
 
-from mxcubecore.HardwareObjects.abstract.AbstractActuator import AbstractActuator
 
-__copyright__ = """ Copyright © 2010- 2022 by the MXCuBE collaboration """
+__copyright__ = """ Copyright © 2019 by the MXCuBE collaboration """
 __license__ = "LGPLv3+"
 
 
 class AbstractTransmission(AbstractActuator):
     """Abstract Transmission
 
-    The value of the transmission is in % (float or int).
-    If the transmission has no continuous values,
-    beamlines should provide the nearest achievable one"""
+    The value of transmission is in % (float or int).
+    If transmission is not continuously variable,
+    beamlines should provide the nearest achievable value"""
 
-    unit = "%"
+    unit = None
 
     __metaclass__ = abc.ABCMeta
 
+    def __init__(self, name):
+        AbstractActuator.__init__(self, name)
+
     def init(self):
-        super().init()
+        AbstractActuator.init(self)
         self.update_limits((0, 100))

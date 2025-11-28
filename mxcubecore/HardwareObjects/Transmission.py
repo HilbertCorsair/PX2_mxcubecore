@@ -1,7 +1,6 @@
 from PyTransmission import matt_control
-
-from mxcubecore import HardwareRepository as HWR
 from mxcubecore.BaseHardwareObjects import HardwareObject
+from mxcubecore import HardwareRepository as HWR
 
 
 class Transmission(HardwareObject):
@@ -17,6 +16,7 @@ class Transmission(HardwareObject):
         # self.setTransmission = self.set_value
 
     def init(self):
+
         self.__matt = matt_control.MattControl(
             self.get_property("wago_ip"),
             len(self["filter"]),

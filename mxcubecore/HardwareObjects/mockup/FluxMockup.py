@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -17,50 +17,40 @@
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with MXCuBE. If not, see <http://www.gnu.org/licenses/>.
 
-"""
-Mock-up class to simulate the beamline flux, used for testing.
-"""
-
 from random import random
-
-import gevent
-
-from mxcubecore import HardwareRepository as HWR
 from mxcubecore.HardwareObjects.abstract.AbstractFlux import AbstractFlux
 
-__copyright__ = """ Copyright © 2010-2022 by the MXCuBE collaboration """
-__license__ = "LGPLv3+"
+from mxcubecore import HardwareRepository as HWR
+
+__credits__ = ["MXCuBE collaboration"]
+__category__ = "General"
 
 
 class FluxMockup(AbstractFlux):
-    """Class to simulate beamline flux"""
+
+    # default_flux - for initialising mockup
+    default_flux = 1e10
 
     def __init__(self, name):
-        super().__init__(name)
+        AbstractFlux.__init__(self, name)
 
         self.measured_flux_list = []
         self.measured_flux_dict = {}
         self.current_flux_dict = {}
 
     def init(self):
-        super().init()
-        self.current_flux_dict["flux"] = self.default_value
+
+        self.measure_flux()
 
     def get_value(self):
         """Get flux at current transmission in units of photons/s"""
-        self.measure_flux()
         return self.current_flux_dict["flux"]
 
-    def measure_flux(self) -> None:
-        """
-        measures intensity
-
-        Emits:
-           valueChanged (float): The new flux value
-        """
+    def measure_flux(self):
+        """Measures intesity"""
         beam_size = HWR.beamline.beam.get_beam_size()
         transmission = HWR.beamline.transmission.get_value()
-        flux = self.default_value * (1 + 0.001 * random()) * transmission / 100.0
+        flux = self.default_flux * (1 + random())
 
         self.measured_flux_list = [
             {
@@ -74,23 +64,7 @@ class FluxMockup(AbstractFlux):
         self.measured_flux_dict = self.measured_flux_list[0]
         self.current_flux_dict = self.measured_flux_list[0]
 
-        self.emit("valueChanged", self.current_flux_dict["flux"])
-
-    @property
-    def is_beam(self):
-        """Check if there is beam
-        Returns:
-            (bool): True if beam present, False otherwise
-        """
-        return True
-
-    def wait_for_beam(self, timeout=None):
-        """Wait until beam present
-        Args:
-            timeout (float): optional - timeout [s],
-                             If timeout == 0: return at once and do not wait
-                                              (default);
-                             if timeout is None: wait forever.
-        """
-        with gevent.Timeout(timeout, RuntimeError("Timeout while waiting for beam")):
-            gevent.sleep(timeout + 1)
+        self.emit(
+            "fluxInfoChanged",
+            {"measured": self.measured_flux_dict, "current": self.current_flux_dict},
+        )

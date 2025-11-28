@@ -1,23 +1,25 @@
 """
-File:  PX1Collect.py
+ File:  PX1Collect.py
 
 """
 
-import logging
 import os
-import socket
-import subprocess
 import sys
 import time
-
+import logging
 import gevent
+import subprocess
+import socket
+
+from mxcubecore.Command.Tango import DeviceProxy
+
+from mxcubecore.TaskUtils import task
+from mxcubecore.BaseHardwareObjects import HardwareObject
+from mxcubecore.HardwareObjects.abstract.AbstractCollect import AbstractCollect
+
 from SOLEILMergeImage import merge as merge_images
 
 from mxcubecore import HardwareRepository as HWR
-from mxcubecore.BaseHardwareObjects import HardwareObject
-from mxcubecore.Command.Tango import DeviceProxy
-from mxcubecore.HardwareObjects.abstract.AbstractCollect import AbstractCollect
-from mxcubecore.TaskUtils import task
 
 __author__ = "Vicente Rey Bakaikoa"
 __credits__ = ["MXCuBE collaboration"]
@@ -26,8 +28,8 @@ __version__ = "2.3"
 
 class PX1Collect(AbstractCollect, HardwareObject):
     """Main data collection class. Inherited from AbstractMulticollect
-    Collection is done by setting collection parameters and
-    executing collect command
+       Collection is done by setting collection parameters and
+       executing collect command
     """
 
     adxv_host = "127.0.0.1"
@@ -108,11 +110,12 @@ class PX1Collect(AbstractCollect, HardwareObject):
         self.emit("collectReady", (True,))
 
     def data_collection_hook(self):
-        """Main collection hook"""
+        """Main collection hook
+        """
 
         collection_type = self.current_dc_parameters["experiment_type"]
 
-        self.log.info(
+        logging.getLogger("HWR").info(
             "PX1Collect: Running PX1 data collection hook. Type is %s" % collection_type
         )
 
@@ -157,11 +160,12 @@ class PX1Collect(AbstractCollect, HardwareObject):
         self.collection_finished()
 
     def prepare_standard_collection(self):
+
         osc_seq = self.current_dc_parameters["oscillation_sequence"][0]
         fileinfo = self.current_dc_parameters["fileinfo"]
         basedir = fileinfo["directory"]
 
-        self.log.info("PX1Collect: fileinfo is %s " % str(fileinfo))
+        logging.getLogger("HWR").info("PX1Collect: fileinfo is %s " % str(fileinfo))
         imgname = fileinfo["template"] % osc_seq["start_image_number"]
 
         # move omega to start angle
@@ -171,7 +175,7 @@ class PX1Collect(AbstractCollect, HardwareObject):
         osc_range = osc_seq["range"]
         exp_time = osc_seq["exposure_time"]
 
-        self.log.info(
+        logging.getLogger("HWR").info(
             "PX1Collect:  nb_images: %s / osc_range: %s / exp_time: %s"
             % (nb_images, osc_range, exp_time)
         )
@@ -206,6 +210,7 @@ class PX1Collect(AbstractCollect, HardwareObject):
         self.collect_device.Start()
 
     def follow_collection_progress(self):
+
         osc_seq = self.current_dc_parameters["oscillation_sequence"][0]
         fileinfo = self.current_dc_parameters["fileinfo"]
         basedir = fileinfo["directory"]
@@ -276,6 +281,7 @@ class PX1Collect(AbstractCollect, HardwareObject):
         return True
 
     def start_characterization(self):
+
         osc_seq = self.current_dc_parameters["oscillation_sequence"][0]
         fileinfo = self.current_dc_parameters["fileinfo"]
 
@@ -354,14 +360,14 @@ class PX1Collect(AbstractCollect, HardwareObject):
         #
         # data collection end (or abort)
         #
-        self.log.info("PX1Collect: finishing data collection ")
+        logging.getLogger("HWR").info("PX1Collect: finishing data collection ")
         HWR.beamline.diffractometer.omega.stop()
         HWR.beamline.fast_shutter.closeShutter()
 
         self.emit("progressStop")
 
     def data_collection_failed(self):
-        self.log.info(
+        logging.getLogger("HWR").info(
             "PX1Collect: Data collection failed. recovering sequence should go here"
         )
 
@@ -428,7 +434,7 @@ class PX1Collect(AbstractCollect, HardwareObject):
         time.sleep(0.3)  # allow time to refresh display after
 
         HWR.beamline.sample_view.save_snapshot(filename)
-        self.log.debug("PX1Collect:  - snapshot saved to %s" % filename)
+        logging.getLogger("HWR").debug("PX1Collect:  - snapshot saved to %s" % filename)
 
     def generate_thumbnails(self, filename, jpeg_filename, thumbnail_filename):
         #
@@ -450,8 +456,10 @@ class PX1Collect(AbstractCollect, HardwareObject):
                 )
                 return False
         except Exception:
+            import traceback
+
             logging.error("PX1Collect: Cannot generate thumbnails for %s" % filename)
-            logging.exception("")
+            logging.error(traceback.format_exc())
             return False
 
     ## generate snapshots and data thumbnails (END) ##
@@ -485,14 +493,17 @@ class PX1Collect(AbstractCollect, HardwareObject):
         try:
             os.chmod(process_dir, 0o777)
         except Exception:
-            self.log.error(
+            import traceback
+
+            logging.getLogger("HWR").error(
                 "PX1Collect: Error changing permissions for PROCESS directory"
             )
-            self.log.exception()
+            logging.getLogger("HWR").error(traceback.format_exc())
 
         self.create_goimg_file(process_dir)
 
     def create_goimg_file(self, dirname):
+
         db_f = os.path.join(self.goimg_dir, self.goimg_filename)
         if os.path.exists(db_f):
             os.remove(db_f)
@@ -572,6 +583,7 @@ class PX1Collect(AbstractCollect, HardwareObject):
     ## FILE SYSTEM (END) ##
 
     def prepare_devices_for_collection(self):
+
         fileinfo = self.current_dc_parameters["fileinfo"]
         basedir = fileinfo["directory"]
 
@@ -612,7 +624,7 @@ class PX1Collect(AbstractCollect, HardwareObject):
         if not self.is_collect_phase():
             success = self.go_to_collect()
             if not success:
-                self.log.info("PX1Collect: Cannot set COLLECT phase")
+                logging.getLogger("HWR").info("PX1Collect: Cannot set COLLECT phase")
                 return False
         return True
 
@@ -740,7 +752,7 @@ class PX1Collect(AbstractCollect, HardwareObject):
             if env_state != "RUNNING" and self.is_collect_phase():
                 break
             if time.time() - t0 > timeout:
-                self.log.debug(
+                logging.getLogger("HWR").debug(
                     "PX1Collect: timeout sending supervisor to collect phase"
                 )
                 break
@@ -762,7 +774,7 @@ class PX1Collect(AbstractCollect, HardwareObject):
             if env_state != "RUNNING" and self.is_sampleview_phase():
                 break
             if time.time() - t0 > timeout:
-                self.log.debug(
+                logging.getLogger("HWR").debug(
                     "PX1Collect: timeout sending supervisor to sample view phase"
                 )
                 break
@@ -851,6 +863,7 @@ class PX1Collect(AbstractCollect, HardwareObject):
 
     ## ADXV display images ##
     def adxv_connect(self):
+
         #  connect every time?? maybe we can do better
         try:
             res = socket.getaddrinfo(
@@ -865,6 +878,7 @@ class PX1Collect(AbstractCollect, HardwareObject):
             logging.getLogger().info("PX1Collect: WARNING: Can't connect to ADXV.")
 
     def adxv_show_latest(self, fileinfo):
+
         now = time.time()
         elapsed = now - self.adxv_latest_refresh
 
@@ -886,6 +900,7 @@ class PX1Collect(AbstractCollect, HardwareObject):
             self.adxv_last_refresh = time.time()
 
     def adxv_sync_image(self, filename):
+
         adxv_send_cmd = "\nload_image %s\n" + chr(32)
 
         try:

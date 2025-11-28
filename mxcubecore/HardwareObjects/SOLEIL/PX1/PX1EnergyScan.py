@@ -10,29 +10,29 @@ Notes:
    This has been modified to follow the AbstractEnergyScan method
 
 """
-
 import logging
-import math
 import os
-import subprocess
 import time
-
-import gevent
+import math
 import numpy
-from AbstractEnergyScan import AbstractEnergyScan
-from matplotlib.backends.backend_agg import FigureCanvasAgg
-from matplotlib.figure import Figure
-from xabs_lib import McMaster
+import gevent
+import subprocess
 
-from mxcubecore import HardwareRepository as HWR
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_agg import FigureCanvasAgg
+
+from AbstractEnergyScan import AbstractEnergyScan
+from mxcubecore.TaskUtils import task, cleanup
+
+from xabs_lib import McMaster
 from mxcubecore.Command.Tango import DeviceProxy
-from mxcubecore.TaskUtils import (
-    cleanup,
-    task,
-)
+
+from mxcubecore.BaseHardwareObjects import Equipment
+from mxcubecore import HardwareRepository as HWR
 
 
 class PX1EnergyScan(AbstractEnergyScan, Equipment):
+
     round_cutoff = 4
     roi_width = 0.30
 
@@ -46,7 +46,7 @@ class PX1EnergyScan(AbstractEnergyScan, Equipment):
 
     def __init__(self, name):
         AbstractEnergyScan.__init__(self)
-        super().__init__(name)
+        Equipment.__init__(self, name)
 
         self.scanning = False
         self.stopping = False
@@ -58,7 +58,7 @@ class PX1EnergyScan(AbstractEnergyScan, Equipment):
         self.scan_info = {}
         self.scan_data = []
 
-        self.log = self.log
+        self.log = logging.getLogger("HWR")
 
     def init(self):
         self.ready_event = gevent.event.Event()
@@ -202,6 +202,7 @@ class PX1EnergyScan(AbstractEnergyScan, Equipment):
         self.fluodet_hwo.set_roi(self.roi_start_chan, self.roi_end_chan)
 
     def acquire_point(self, en):
+
         self.open_fast_shutter()
         self.fluodet_hwo.start()
         self.fluodet_hwo.wait()
@@ -265,10 +266,11 @@ class PX1EnergyScan(AbstractEnergyScan, Equipment):
         self.scan_info["beamSizeHorizontal"] = size_hor
         self.scan_info["beamSizeVertical"] = size_ver
 
-    def start_energy_scan(
+    def startEnergyScan(
         self, element, edge, directory, prefix, session_id=None, blsample_id=None
     ):
-        log = self.log
+
+        log = logging.getLogger("HWR")
 
         self.scan_info = {
             "sessionId": session_id,
@@ -313,7 +315,11 @@ class PX1EnergyScan(AbstractEnergyScan, Equipment):
 
             self.scanCommandFinished()
         except Exception:
-            self.log.exception("EnergyScan: problem starting energy scan.")
+            import traceback
+
+            logging.getLogger("HWR").error(
+                "EnergyScan: problem starting energy scan. %s" % traceback.format_exc()
+            )
             self.scanCommandFailed()
             self.scanStatusChanged("error starting energy scan")
             return False
@@ -375,7 +381,7 @@ class PX1EnergyScan(AbstractEnergyScan, Equipment):
         self.ready_event.set()
 
     def scanCommandFinished(self, *args):
-        self.log.debug("EnergyScan: finished")
+        logging.getLogger("HWR").debug("EnergyScan: finished")
 
         with cleanup(self.ready_event.set):
             self.scan_info["endTime"] = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -389,12 +395,13 @@ class PX1EnergyScan(AbstractEnergyScan, Equipment):
             self.emit("energyScanFinished", (self.scan_info,))
             self.emit("progressStop", ())
 
-    def do_chooch(
+    def doChooch(
         self, elt, edge, scan_directory, archive_directory, prefix, run_number=None
     ):
+
         symbol = "_".join((elt, edge))
 
-        self.log.info("EnergyScan. executing do_chooch")
+        self.log.info("EnergyScan. executing doChooch")
 
         scan_file_prefix = os.path.join(scan_directory, prefix)
         archive_file_prefix = os.path.join(archive_directory, prefix)
@@ -421,13 +428,17 @@ class PX1EnergyScan(AbstractEnergyScan, Equipment):
             if not os.path.exists(archive_directory):
                 os.makedirs(archive_directory)
         except Exception:
-            self.log.exception("PX1EnergyScan: could not create results directory.")
+            logging.getLogger("HWR").exception(
+                "PX1EnergyScan: could not create results directory."
+            )
             self.store_energy_scan()
             self.scanCommandFailed()
             return
 
         if not self.save_raw(scan_file_raw_filename, archive_file_raw_filename):
-            self.log.exception("PX1EnergyScan: could not save data raw file")
+            logging.getLogger("HWR").exception(
+                "PX1EnergyScan: could not save data raw file"
+            )
             self.store_energy_scan()
             self.scanCommandFailed()
             return
@@ -453,6 +464,7 @@ class PX1EnergyScan(AbstractEnergyScan, Equipment):
                 ],
                 stdout=subprocess.PIPE,
             )
+            #
             chooch_result_lines = p.communicate()[0].split("\n")
 
             # there could messages in stdout. results are identified with -chooch_results- header line
@@ -482,7 +494,9 @@ class PX1EnergyScan(AbstractEnergyScan, Equipment):
                 ) = result_data
             else:
                 self.store_energy_scan()
-                self.log.error("Energy scan: Chooch cannot parse results")
+                logging.getLogger("HWR").error(
+                    "Energy scan: Chooch cannot parse results"
+                )
                 return
             # scan_data = self.get_scan_data()
             # self.log.debug("running chooch with values: element=%s, element=%s" % (elt,edge))
@@ -493,9 +507,11 @@ class PX1EnergyScan(AbstractEnergyScan, Equipment):
             # pk, fppPeak, fpPeak, ip, fppInfl, fpInfl, chooch_graph_data = \
             #       result
         except Exception:
-            self.log.exception("")
+            import traceback
+
+            self.log.debug(traceback.format_exc())
             self.store_energy_scan()
-            self.log.error("Energy scan: Chooch failed")
+            logging.getLogger("HWR").error("Energy scan: Chooch failed")
             return
 
         self.log.info("EnergyScan. running chooch done")
@@ -512,7 +528,7 @@ class PX1EnergyScan(AbstractEnergyScan, Equipment):
 
         self.thEdge = self.e_edge
 
-        self.log.info(
+        logging.getLogger("HWR").info(
             "th. Edge %s ; chooch results are pk=%f, ip=%f, rm=%f"
             % (self.thEdge, pk, ip, rm)
         )
@@ -529,20 +545,20 @@ class PX1EnergyScan(AbstractEnergyScan, Equipment):
             ip = 0
             rm = self.thEdge + 0.03
 
-            self.log.warning(
+            logging.getLogger("HWR").warning(
                 "EnergyScan: calculated peak is %s theoretical value more than 20eV"
                 % side
             )
-            self.log.warning("   calculated = %s" % savpk)
-            self.log.warning("  theoretical = %s" % self.thEdge)
+            logging.getLogger("HWR").warning("   calculated = %s" % savpk)
+            logging.getLogger("HWR").warning("  theoretical = %s" % self.thEdge)
 
         if not self.copy_efs(scan_file_efs_filename, archive_file_efs_filename):
-            self.log.warning("  copy efs failed ")
+            logging.getLogger("HWR").warning("  copy efs failed ")
             self.store_energy_scan()
             self.scanCommandFailed()
             return
 
-        self.log.warning(
+        logging.getLogger("HWR").warning(
             "  efs file has been archived at %s" % archive_file_efs_filename
         )
 
@@ -562,14 +578,16 @@ class PX1EnergyScan(AbstractEnergyScan, Equipment):
         self.scan_info["filename"] = archive_file_raw_filename
         # self.scan_info["workingDirectory"] = archive_directory
 
-        self.log.warning("  generating graph data from %s" % str(chooch_graph_data))
+        logging.getLogger("HWR").warning(
+            "  generating graph data from %s" % str(chooch_graph_data)
+        )
 
         chooch_graph_x, chooch_graph_y1, chooch_graph_y2 = zip(*chooch_graph_data)
         chooch_graph_x = list(chooch_graph_x)
         for i in range(len(chooch_graph_x)):
             chooch_graph_x[i] = chooch_graph_x[i] / 1000.0
 
-        self.log.info("PX1EnergScan. Saving png")
+        logging.getLogger("HWR").info("PX1EnergScan. Saving png")
 
         # prepare to save png files
         title = "%10s  %6s  %6s\n%10s  %6.2f  %6.2f\n%10s  %6.2f  %6.2f" % (
@@ -606,21 +624,21 @@ class PX1EnergyScan(AbstractEnergyScan, Equipment):
         self.scan_info["jpegChoochFileFullPath"] = str(escan_ispyb_path)
 
         try:
-            self.log.info(
+            logging.getLogger("HWR").info(
                 "Rendering energy scan and Chooch graphs to PNG file : %s",
                 scan_file_png_filename,
             )
             canvas.print_figure(scan_file_png_filename, dpi=80)
         except Exception:
-            self.log.exception("could not print figure")
+            logging.getLogger("HWR").exception("could not print figure")
         try:
-            self.log.info(
+            logging.getLogger("HWR").info(
                 "Rendering energy scan and Chooch graphs to PNG file : %s",
                 archive_file_png_filename,
             )
             canvas.print_figure(archive_file_png_filename, dpi=80)
         except Exception:
-            self.log.exception("could not save figure")
+            logging.getLogger("HWR").exception("could not save figure")
 
         self.store_energy_scan()
 
@@ -666,7 +684,9 @@ class PX1EnergyScan(AbstractEnergyScan, Equipment):
             self.log.info("EnergyScan. saving data in %s" % scan_filename)
             self.log.info("EnergyScan. archiving data in %s" % archive_filename)
         except Exception:
-            self.log.exception("EMBLEnergyScan: could not create results raw file")
+            logging.getLogger("HWR").exception(
+                "EMBLEnergyScan: could not create results raw file"
+            )
             return False
 
         scan_data = self.get_scan_data()

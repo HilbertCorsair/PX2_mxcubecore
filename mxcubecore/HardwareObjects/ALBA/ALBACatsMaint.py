@@ -1,4 +1,6 @@
-from mxcubecore.HardwareObjects.abstract.sample_changer.CatsMaint import CatsMaint
+from mxcubecore.HardwareObjects.abstract.sample_changer.CatsMaint import (
+    CatsMaint,
+)
 
 
 class ALBACatsMaint(CatsMaint):

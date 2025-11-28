@@ -17,10 +17,11 @@ between two Point objects.
 
 """
 
+import logging
 import os
+from mxcubecore.HardwareObjects import queue_model_objects
 
 from mxcubecore.BaseHardwareObjects import HardwareObject
-from mxcubecore.model import queue_model_objects
 
 SELECTED_COLOR = "green"
 NORMAL_COLOR = "yellow"
@@ -49,7 +50,7 @@ class ShapeHistoryMockup(HardwareObject):
         :returns: None
         """
         if self._drawing:
-            self.log.info(
+            logging.getLogger("HWR").info(
                 "Setting previous drawing:" + str(self._drawing) + " to " + str(drawing)
             )
 
@@ -87,7 +88,7 @@ class ShapeHistoryMockup(HardwareObject):
         :param image: The QWidget that contains the image to extract
         :type image: QWidget
 
-        :param canvas: The QCanvas object to add as overlay
+        :param canvas: The QCanvas obejct to add as overlay
         :type canvas: QCanvas
 
         :param zoom: Zoom level

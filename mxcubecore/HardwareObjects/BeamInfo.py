@@ -5,7 +5,7 @@
 BeamInfo hardware object is used to define final beam size and shape.
 It can include aperture, slits and/or other beam definer (lenses or other eq.)
 
-[Emitted signals]
+[Emited signals]
 beamInfoChanged
 beamPosChanged
 
@@ -19,10 +19,12 @@ beamPosChanged
 -----------------------------------------------------------------------
 """
 
-from mxcubecore.BaseHardwareObjects import HardwareObject
+import logging
+from mxcubecore.BaseHardwareObjects import Equipment
+from mxcubecore import HardwareRepository as HWR
 
 
-class BeamInfo(HardwareObject):
+class BeamInfo(Equipment):
     """
     Description:
     """
@@ -31,7 +33,7 @@ class BeamInfo(HardwareObject):
         """
         Descrip. :
         """
-        super().__init__(*args)
+        Equipment.__init__(self, *args)
 
         self.aperture_hwobj = None
         self.beam_definer = None
@@ -56,7 +58,6 @@ class BeamInfo(HardwareObject):
         self.beam_size_definer = [9999, 9999]
         self.beam_position = (0, 0)
         self.beam_info_dict = {}
-        self.polarisation = self.get_property("polarisation", 0.99)
 
         self.aperture_hwobj = self.get_object_by_role("aperture")
         if self.aperture_hwobj is not None:
@@ -64,20 +65,20 @@ class BeamInfo(HardwareObject):
                 self.aperture_hwobj, "apertureChanged", self.aperture_pos_changed
             )
         else:
-            self.log.debug("BeamInfo: Aperture hwobj not defined")
+            logging.getLogger("HWR").debug("BeamInfo: Aperture hwobj not defined")
 
         self.slits_hwobj = self.get_object_by_role("slits")
         if self.slits_hwobj is not None:
             self.connect(self.slits_hwobj, "gapSizeChanged", self.slits_gap_changed)
         else:
-            self.log.debug("BeamInfo: Slits hwobj not defined")
+            logging.getLogger("HWR").debug("BeamInfo: Slits hwobj not defined")
 
         if self.beam_definer is not None:
             self.connect(
                 self.beam_definer, "definerPosChanged", self.definer_pos_changed
             )
         else:
-            self.log.debug("BeamInfo: Beam definer hwobj not defined")
+            logging.getLogger("HWR").debug("BeamInfo: Beam definer hwobj not defined")
 
         default_beam_divergence_vertical = None
         default_beam_divergence_horizontal = None
@@ -89,7 +90,7 @@ class BeamInfo(HardwareObject):
                 self.get_property("beam_divergence_horizontal")
             )
         except Exception:
-            self.log.exception("")
+            pass
         self.default_beam_divergence = [
             default_beam_divergence_horizontal,
             default_beam_divergence_vertical,

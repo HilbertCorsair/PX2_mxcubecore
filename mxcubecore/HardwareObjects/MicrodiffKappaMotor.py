@@ -1,16 +1,17 @@
+import logging
 import time
-
 import gevent
 import numpy as np
+import logging
 
-from mxcubecore.HardwareObjects.abstract.AbstractMotor import MotorStates
 from mxcubecore.HardwareObjects.ExporterMotor import ExporterMotor
+from mxcubecore.HardwareObjects.abstract.AbstractMotor import MotorStates
 
 
 class MicrodiffKappaMotor(ExporterMotor):
     lock = gevent.lock.Semaphore()
-    motors = {}
-    conf = {}
+    motors = dict()
+    conf = dict()
 
     def __init__(self, name):
         ExporterMotor.__init__(self, name)
@@ -93,8 +94,8 @@ class MicrodiffKappaMotor(ExporterMotor):
         For more info see Acta Cryst.(2011). A67, 219-228, Sandor Brockhauser et al., formula (3).
         See also MXSUP-1823.
         """
-        self.log.info("In MicrodiffKappaMotor.getNewSamplePosition")
-        self.log.info(
+        logging.getLogger("HWR").info("In MicrodiffKappaMotor.getNewSamplePosition")
+        logging.getLogger("HWR").info(
             "Input arguments: Kappa %.2f Phi %.2f sampx %.3f sampy %.3f phiy %.3f Kappa2 %.2f Phi2 %.2f"
             % (kappaAngle1, phiAngle1, sampx, sampy, phiy, kappaAngle2, phiAngle2)
         )
@@ -122,7 +123,7 @@ class MicrodiffKappaMotor(ExporterMotor):
         new_motor_pos["sampx"] = float(-t_end[0])
         new_motor_pos["sampy"] = float(-t_end[1])
         new_motor_pos["phiy"] = float(-t_end[2])
-        self.log.info("New motor positions: %r" % new_motor_pos)
+        logging.getLogger("HWR").info("New motor positions: %r" % new_motor_pos)
         return new_motor_pos
 
     def rotation_invariant(self, v):

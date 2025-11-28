@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -17,16 +17,17 @@
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with MXCuBE. If not, see <http://www.gnu.org/licenses/>.
 
+import logging
 
+from mxcubecore.utils import qt_import
 from mxcubecore.HardwareObjects import QtGraphicsLib as GraphicsLib
 from mxcubecore.HardwareObjects.QtGraphicsManager import QtGraphicsManager
-from mxcubecore.utils import qt_import
 
 SEQ_ITEM_COLORS = (
     qt_import.QColor(204, 255, 204),
     qt_import.QColor(254, 254, 121),
     qt_import.QColor(72, 191, 255),
-    qt_import.QColor(142, 69, 133, 70),
+    qt_import.QColor(142, 69, 133, 70)
 )
 
 
@@ -36,6 +37,7 @@ __category__ = "General"
 
 class EMBLSSXChip(QtGraphicsManager):
     def __init__(self, name):
+
         QtGraphicsManager.__init__(self, name)
 
         self.chip_config_list = None
@@ -53,7 +55,8 @@ class EMBLSSXChip(QtGraphicsManager):
         self.graphics_coord_axes_item = None
 
     def init(self):
-        """Reads config xml, initiates all necessary hwobj, channels and cmds"""
+        """Reads config xml, initiates all necessary hwobj, channels and cmds
+        """
 
         self.chip_config_list = eval(self.get_property("chip_properties", "[]"))
         self.current_chip_index = 0
@@ -109,7 +112,9 @@ class EMBLSSXChip(QtGraphicsManager):
         if item_name in self.chip_config_list[self.current_chip_index]:
             self.chip_config_list[self.current_chip_index][item_name] = item_value
         else:
-            self.log.warning("Item %s not found in the config dict" % item_name)
+            logging.getLogger("HWR").warning(
+                "Item %s not found in the config dict" % item_name
+            )
 
     def get_dg_channels_list(self):
         return self.dg_channels_list
@@ -244,9 +249,10 @@ class EMBLSSXChip(QtGraphicsManager):
                             for exposure in range(
                                 0, len(self.dg_channel_list_one_zero) / 4
                             ):
+
                                 # meandering
                                 if current_chip_config["meandering"]:
-                                    # checks whether n_fv is odd or even, then creates
+                                    # checks wether n_fv is odd or even, then creates
                                     # modified_n_fh
                                     if n_fv % 2 != 0:
                                         modified_n_fh = num_crystal_h - n_fh - 1
@@ -325,9 +331,10 @@ class EMBLSSXChip(QtGraphicsManager):
                     for n_fv in range(0, num_crystal_v):
                         for n_fh in range(0, num_crystal_h):
                             for exposure in range(0, len(dg_channel_list_one_zero) / 4):
+
                                 # meandering
                                 if meandering == 1:
-                                    # checks whether n_fv is odd or even, then creates
+                                    # checks wether n_fv is odd or even, then creates
                                     # modified_n_fh
                                     if n_fv % 2 != 0:
                                         modified_n_fh = num_crystal_h - n_fh - 1

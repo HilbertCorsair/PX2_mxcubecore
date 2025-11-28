@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -18,11 +18,13 @@
 #  along with MXCuBE. If not, see <http://www.gnu.org/licenses/>.
 
 import time
+import yaml
+import logging
+
 from datetime import datetime
 
-import yaml
-
 from mxcubecore.BaseHardwareObjects import HardwareObject
+
 
 __author__ = "EMBL Hamburg"
 __credits__ = ["MXCuBE collaboration"]
@@ -31,19 +33,20 @@ __version__ = "2.3."
 
 class StateMachine(HardwareObject):
     """Finite State Machine (FSM) is a mathematical model of a closed or
-    opened loop discrete-event systems with well defined state.
-    It is wildly used to define functioning system and control their
-    execution. In the case of MX beamlines and MXCuBE FSM represents
-    different state where certain action from a user is requested.
-    It is possible to describe a sequence of user actions as a discrete
-    state that are logically connected.
-    For example, each MX experiment requires a crystal to be mounted on a
-    goniostat. If not crystal is mounted then it makes no sense to
-    continue an experiment.
-    The actual transition logic is implemented in the update_fsm_state()
+       opened loop discreet-event systems with well defined state.
+       It is wildly used to define functioning system and control their
+       execution. In the case of MX beamlines and MXCuBE FSM represents
+       different state where certain action from a user is requested.
+       It is possible to describe a sequence of user actions as a discreet
+       state that are logically connected.
+       For example, each MX experiment requires a crystal to be mounted on a
+       goniostat. If not crystal is mounted then it makes no sense to
+       continue an experiment.
+       The actual transition logic is implemented in the update_fsm_state()
     """
 
     def __init__(self, name):
+
         HardwareObject.__init__(self, name)
 
         self.state_list = []
@@ -70,12 +73,12 @@ class StateMachine(HardwareObject):
 
         for transition in self.transition_list:
             if not self.get_state_by_name(transition["source"]):
-                self.log.error(
+                logging.getLogger("HWR").error(
                     "Transition %s " % str(transition)
                     + "has a none existing source state: %s" % transition["source"]
                 )
             if not self.get_state_by_name(transition["dest"]):
-                self.log.error(
+                logging.getLogger("HWR").error(
                     "Transition %s " % str(transition)
                     + "has a none existing destination state: %s" % transition["dest"]
                 )
@@ -89,19 +92,19 @@ class StateMachine(HardwareObject):
 
             for condition_name in transition["conditions_true"]:
                 if not self.get_condition_by_name(condition_name):
-                    self.log.error(
+                    logging.getLogger("HWR").error(
                         "Transition %s " % str(transition)
                         + "has a none existing condition: %s" % condition_name
                     )
             for condition_name in transition["conditions_false"]:
                 if not self.get_condition_by_name(condition_name):
-                    self.log.error(
+                    logging.getLogger("HWR").error(
                         "Transition %s " % str(transition)
                         + "has a none existing condition: %s" % condition_name
                     )
             for condition_name in transition["conditions_false_or"]:
                 if not self.get_condition_by_name(condition_name):
-                    self.log.error(
+                    logging.getLogger("HWR").error(
                         "Transition %s " % str(transition)
                         + "has a none existing condition: %s" % condition_name
                     )
@@ -111,7 +114,7 @@ class StateMachine(HardwareObject):
         self.bl_setup_hwobj = self.get_object_by_role("beamline_setup")
         for hwobj_name in dir(self.bl_setup_hwobj):
             if hwobj_name.endswith("hwobj"):
-                # self.log.debug(\
+                # logging.getLogger("HWR").debug(\
                 #     "StateMachine: Attaching hwobj: %s " % hwobj_name)
                 self.connect(
                     getattr(self.bl_setup_hwobj, hwobj_name),
@@ -135,7 +138,7 @@ class StateMachine(HardwareObject):
 
         condition = self.get_condition_by_name(condition_name)
         if condition:
-            # self.log.debug(\
+            # logging.getLogger("HWR").debug(\
             #  "StateMachine: condition '%s' changed to '%s'" \
             #   % (condition_name, value))
 
@@ -144,16 +147,16 @@ class StateMachine(HardwareObject):
                 self.emit("conditionChanged", self.condition_list)
                 self.update_fsm_state()
         else:
-            self.log.debug(
+            logging.getLogger("HWR").debug(
                 "StateMachine: condition '%s' not in the condition list"
                 % condition_name
             )
 
     def update_fsm_state(self):
         """Updates state machine
-        We look at the current state and available transitions from it
-        If all conditions of a transition is met then the transition is
-        executed and signal is emitted.
+            We look at the current state and available transitions from it
+            If all conditions of a transition is met then the tranition is
+            executed and signal is emitted.
         """
         for transition in self.transition_list:
             if transition["source"] == self.current_state:
@@ -198,7 +201,7 @@ class StateMachine(HardwareObject):
             }
             self.history_state_list.append(history_state_item)
             self.previous_state = self.current_state
-            self.log.debug(
+            logging.getLogger("HWR").debug(
                 "StateMachine: current state " + "changed to : %s" % self.current_state
             )
             self.emit("stateChanged", self.history_state_list)

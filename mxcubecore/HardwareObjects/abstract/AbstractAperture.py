@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -18,33 +18,18 @@
 #  along with MXCuBE. If not, see <http://www.gnu.org/licenses/>.
 
 
-"""Abstract hardware object for the aperture."""
-
-from __future__ import annotations
-
+import logging
 from warnings import warn
 
 from mxcubecore.BaseHardwareObjects import HardwareObject
 
-__copyright__ = """ Copyright © 2010-2022 by the MXCuBE collaboration """
-__license__ = "LGPLv3+"
+
+__credits__ = ["MXCuBE collaboration"]
+__license__ = "LGPLv3"
 
 
 class AbstractAperture(HardwareObject):
-    """Abstract hardware object for the aperture.
-
-    Emits:
-        diameterIndexChanged (int, float):
-            Two-item tuple: current index and diameter in millimeters.
-        valueChanged (str):
-            Current position name.
-    """
-
-    def __init__(self, name: str) -> None:
-        warn(
-            "AbstractAperture is deprecated. Use AbstractNState instead",
-            DeprecationWarning,
-        )
+    def __init__(self, name):
         HardwareObject.__init__(self, name)
 
         self._current_position_name = None
@@ -56,42 +41,43 @@ class AbstractAperture(HardwareObject):
         try:
             self._diameter_size_list = eval(self.get_property("diameter_size_list"))
         except Exception:
-            self.log.error("Aperture: no diameter size list defined")
+            logging.getLogger("HWR").error("Aperture: no diameter size list defined")
 
         try:
             self._position_list = eval(self.get_property("position_list"))
         except Exception:
-            self.log.error("Aperture: no position list defined")
+            logging.getLogger("HWR").error("Aperture: no position list defined")
 
-    def get_diameter_size_list(self) -> list[float]:
-        """Get list of diameter sizes.
-
+    def get_diameter_size_list(self):
+        """
         Returns:
-            List of diameter sizes in microns.
+            list: list of diameter sizes in microns
         """
         return self._diameter_size_list
 
-    def get_position_list(self) -> list[str]:
-        """Get list of positions.
-
+    def get_position_list(self):
+        """
         Returns:
-            Position names as a list of strings.
+            list: list of position names as str
         """
         return self._position_list
 
-    def get_diameter_index(self) -> int:
-        """Get current diameter index.
-
+    def get_diameter_index(self):
+        """
         Returns:
-            Current diameter index.
+            int: current diameter index
         """
         return self._current_diameter_index
 
-    def set_diameter_index(self, diameter_index: int) -> None:
-        """Set active diameter index.
+    def set_diameter_index(self, diameter_index):
+        """
+        Sets active diameter index
 
         Args:
-            diameter_index: Selected diameter index.
+            diameter_index (int): selected diameter index
+
+        Emits:
+            diameterIndexChanged (int, float): current index, diameter in mm
         """
         if diameter_index < len(self._diameter_size_list):
             self._current_diameter_index = diameter_index
@@ -101,84 +87,96 @@ class AbstractAperture(HardwareObject):
                 self._diameter_size_list[self._current_diameter_index] / 1000.0,
             )
         else:
-            self.log.warning(
+            logging.getLogger("HWR").warning(
                 "Aperture: Diameter index %d is not valid" % diameter_index
             )
 
-    def get_diameter_size(self) -> float:
-        """Get diameter size.
-
+    def get_diameter_size(self):
+        """
         Returns:
-            Current diameter size in millimeters.
+            float: current diameter size in mm
         """
         return self._diameter_size_list[self._current_diameter_index]
 
-    def set_diameter_size(self, diameter_size: int) -> None:
-        """Set diameter size.
-
+    def set_diameter_size(self, diameter_size):
+        """
         Args:
-            diameter_size: selected diameter index
+            diameter_size (int): selected diameter index
         """
         if diameter_size in self._diameter_size_list:
             self.set_diameter_index(self._diameter_size_list.index(diameter_size))
         else:
-            self.log.warning("Aperture: Selected diameter is not in the diameter list")
+            logging.getLogger("HWR").warning(
+                "Aperture: Selected diameter is not in the diameter list"
+            )
 
-    def get_position_name(self) -> str:
-        """Get current position name.
-
+    def get_position_name(self):
+        """
         Returns:
-            Current position name.
+            str: current position as str
         """
         return self._current_position_name
 
-    def set_position(self, position_index: int) -> None:
+    def set_position(self, position_index):
         warn(
             "set_position is deprecated. Use set_position_index(position_index) instead",
             DeprecationWarning,
         )
         self.set_position_index(position_index)
 
-    def set_position_name(self, position_name: str) -> None:
-        """Set aperture position based on a position name.
+    def set_position_name(self, position_name):
+        """
+        Sets aperture position based on a position name
 
         Args:
-            position_name: Selected position name.
+            position_name (str): selected position
         """
         if position_name in self._position_list:
             self._current_position_name = position_name
             self.emit("valueChanged", self._current_position_name)
         else:
-            self.log.warning(
+            logging.getLogger("HWR").warning(
                 "Aperture: Position %s is not in the position list" % position_name
             )
 
-    def set_position_index(self, position_index: int) -> None:
-        """Set aperture position based on a position index.
+    def set_position_index(self, position_index):
+        """
+        Sets aperture position based on a position index
 
         Args:
-            position_index: Selected position index.
+            position_index (int): selected position index
         """
         if position_index < len(self._position_list):
             self._current_position_name = self._position_list[position_index]
             self.emit("valueChanged", self._current_position_name)
         else:
-            self.log.warning("Aperture: Selected position is not in the position list")
+            logging.getLogger("HWR").warning(
+                "Aperture: Selected position is not in the position list"
+            )
 
     def set_in(self):
-        """Set aperture in the beam."""
+        """
+        Sets aperture in the beam
+        """
+        pass
 
     def set_out(self):
-        """Remove aperture from the beam."""
+        """
+        Removes aperture from the beam
+        """
+        pass
 
-    def is_out(self) -> bool:
+    def is_out(self):
         """
         Returns:
-            ``True`` if aperture is in the beam, otherwise returns ``False``.
+            bool: True if aperture is in the beam, otherwise returns false
         """
+        pass
 
-    def force_emit_signals(self) -> None:
-        """Reemit all signals."""
+    def force_emit_signals(self):
+        """
+        Reemits all signals
+        """
         self.emit("valueChanged", self._current_position_name)
         self.emit(
             "diameterIndexChanged",

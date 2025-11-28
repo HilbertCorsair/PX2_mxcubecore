@@ -39,8 +39,8 @@ class SecureXMLRpcRequestHandler(SimpleXMLRPCRequestHandler):
 
     def setup(self):
         self.connection = self.request
-        self.rfile = self.connection.makefile("rb", self.rbufsize)
-        self.wfile = self.connection.makefile("wb", self.wbufsize)
+        self.rfile = self.connection.makefile('rb', self.rbufsize)
+        self.wfile = self.connection.makefile('wb', self.wbufsize)
 
     def do_POST(self):
         """
@@ -72,7 +72,7 @@ class SecureXMLRpcRequestHandler(SimpleXMLRPCRequestHandler):
                     chunk = self.rfile.read(chunk_size)
                     if not chunk:
                         break
-                    L.append(chunk.decode("utf-8"))
+                    L.append(chunk.decode('utf-8'))
                     size_remaining -= len(L[-1])
                 data = "".join(L)
                 # In previous versions of SimpleXMLRPCServer, _dispatch
@@ -83,10 +83,17 @@ class SecureXMLRpcRequestHandler(SimpleXMLRPCRequestHandler):
                 response = self.server._marshaled_dispatch(
                     data, getattr(self, "_dispatch", None)
                 )
-            except Exception:  # This should only happen if the module is buggy
+            except Exception as e:  # This should only happen if the module is buggy
                 # internal error, report as HTTP server error
                 self.send_response(500)
-                logging.getLogger("HWR").exception("Exception during request.")
+
+                # Send information about the exception if requested
+                if (
+                    hasattr(self.server, "_send_traceback_header")
+                    and self.server._send_traceback_header
+                ):
+                    self.send_header("X-exception", str(e))
+                    self.send_header("X-traceback", traceback.format_exc())
 
                 self.end_headers()
             else:
@@ -104,3 +111,4 @@ class SecureXMLRpcRequestHandler(SimpleXMLRPCRequestHandler):
             # Unrecognized token - access unauthorized
             self.send_response(401)
             self.end_headers()
+

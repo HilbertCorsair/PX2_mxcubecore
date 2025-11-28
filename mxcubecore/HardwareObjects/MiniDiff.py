@@ -1,32 +1,105 @@
-import copy
-import json
+import gevent
+import tempfile
 import logging
 import math
 import os
 import time
-import xml.etree.ElementTree as ET
-from typing import Union
-
-import gevent
+import copy
 import numpy
-from pydantic import ValidationError
-
-from mxcubecore import HardwareRepository as HWR
-from mxcubecore.BaseHardwareObjects import HardwareObject
-from mxcubecore.HardwareObjects import sample_centring
-from mxcubecore.HardwareObjects.GenericDiffractometer import GonioHeadConfiguration
-from mxcubecore.model import queue_model_objects as qmo
+from mxcubecore.BaseHardwareObjects import Equipment
 from mxcubecore.TaskUtils import task
+from mxcubecore.HardwareObjects import sample_centring
+from mxcubecore.HardwareObjects import queue_model_objects as qmo
+from mxcubecore import HardwareRepository as HWR
+
+try:
+    from Qub.Tools import QubImageSave
+except ImportError:
+    pass
 
 
-class MiniDiff(HardwareObject):
+class myimage:
+    def __init__(self, drawing):
+        self.drawing = drawing
+        matrix = self.drawing.matrix()
+        self.zoom = 1
+        if matrix is not None:
+            self.zoom = matrix.m11()
+
+    def save(self, filename=None):
+        self.img = self.drawing.getPPP()
+
+        if filename is None:
+            fd, name = tempfile.mkstemp()
+            os.close(fd)
+        else:
+            name = filename
+
+        QubImageSave.save(name, self.img, self.drawing.canvas(), self.zoom, "JPEG")
+
+        if filename is None:
+            f = open(name, "r")
+            self.imgcopy = f.read()
+            f.close()
+            os.unlink(name)
+
+    def __str__(self):
+        self.save()
+        return self.imgcopy
+
+
+def set_light_in(light, light_motor, zoom):
+    with gevent.Timeout(5, RuntimeError("Could not set light in")):
+        light_level = None
+
+        if light is not None:
+            light.wagoIn()
+
+        # No light level, choose default
+        if light_motor.get_value() == 0:
+            zoom_level = int(zoom.get_value())
+            light_level = None
+
+            try:
+                light_level = zoom["positions"][0][zoom_level].get_property(
+                    "lightLevel"
+                )
+            except IndexError:
+                logging.getLogger("HWR").info("Could not get default light level")
+                light_level = 1
+
+        if light_level:
+            light_motor.set_value(light_level)
+
+        while light.getWagoState() != "in":
+            time.sleep(0.5)
+
+
+def take_snapshots(number_of_snapshots, light, light_motor, phi, zoom, drawing):
+    if number_of_snapshots <= 0:
+        return
+
+    centredImages = []
+
+    set_light_in(light, light_motor, zoom)
+
+    for i, angle in enumerate([0] + [-90] * (number_of_snapshots - 1)):
+        phi.set_value_relative(angle)
+        logging.getLogger("HWR").info("MiniDiff: taking snapshot #%d", i + 1)
+        centredImages.append((phi.get_value(), str(myimage(drawing))))
+
+    centredImages.reverse()  # snapshot order must be according to positive rotation direction
+
+    return centredImages
+
+
+class MiniDiff(Equipment):
     MANUAL3CLICK_MODE = "Manual 3-click"
-    CENTRING_METHOD_MANUAL = MANUAL3CLICK_MODE
     C3D_MODE = "Computer automatic"
     # MOVE_TO_BEAM_MODE = "Move to Beam"
 
     def __init__(self, *args):
-        super().__init__(*args)
+        Equipment.__init__(self, *args)
 
         qmo.CentredPosition.set_diffractometer_motor_names(
             "phi",
@@ -78,18 +151,7 @@ class MiniDiff(HardwareObject):
             MiniDiff.C3D_MODE: self.start_auto_centring,
         }
 
-        self._run_script = self.add_command(
-            {
-                "type": "exporter",
-                "exporter_address": self.exporter_addr,
-                "name": "runScript",
-            },
-            "runScript",
-        )
-
-        sample_centring.NUM_CENTRING_ROUNDS = self.get_property(
-            "num_centering_rounds", 1
-        )
+        sample_centring.NUM_CENTRING_ROUNDS  = self.get_property("num_centering_rounds", 1)
 
         self.cancel_centring_methods = {}
 
@@ -121,6 +183,9 @@ class MiniDiff(HardwareObject):
         self.kappaMotor = self.get_object_by_role("kappa")
         self.kappaPhiMotor = self.get_object_by_role("kappa_phi")
 
+        # mh 2013-11-05:why is the channel read directly? disabled for the moment
+        # HWR.beamline.sample_view.camera.add_channel({ 'type': 'tango', 'name': 'jpegImage' }, "JpegImage")
+
         self.centringPhi = sample_centring.CentringMotor(self.phiMotor, direction=-1)
         self.centringPhiz = sample_centring.CentringMotor(
             self.phizMotor, reference_position=phiz_ref
@@ -142,33 +207,33 @@ class MiniDiff(HardwareObject):
             try:
                 self.lightWago = hwr.get_hardware_object(wl_prop)
             except Exception:
-                self.log.exception("")
+                pass
 
         if self.phiMotor is not None:
             self.connect(self.phiMotor, "stateChanged", self.phiMotorStateChanged)
             self.connect(self.phiMotor, "valueChanged", self.emit_diffractometer_moved)
         else:
-            self.log.error(
+            logging.getLogger("HWR").error(
                 "MiniDiff: phi motor is not defined in minidiff equipment %s",
-                str(self.name),
+                str(self.name()),
             )
         if self.phizMotor is not None:
             self.connect(self.phizMotor, "stateChanged", self.phizMotorStateChanged)
             self.connect(self.phizMotor, "valueChanged", self.phizMotorMoved)
             self.connect(self.phizMotor, "valueChanged", self.emit_diffractometer_moved)
         else:
-            self.log.error(
+            logging.getLogger("HWR").error(
                 "MiniDiff: phiz motor is not defined in minidiff equipment %s",
-                str(self.name),
+                str(self.name()),
             )
         if self.phiyMotor is not None:
             self.connect(self.phiyMotor, "stateChanged", self.phiyMotorStateChanged)
             self.connect(self.phiyMotor, "valueChanged", self.phiyMotorMoved)
             self.connect(self.phiyMotor, "valueChanged", self.emit_diffractometer_moved)
         else:
-            self.log.error(
+            logging.getLogger("HWR").error(
                 "MiniDiff: phiy motor is not defined in minidiff equipment %s",
-                str(self.name),
+                str(self.name()),
             )
         if self.zoomMotor is not None:
             self.connect(
@@ -182,9 +247,9 @@ class MiniDiff(HardwareObject):
             )
             self.connect(self.zoomMotor, "stateChanged", self.zoomMotorStateChanged)
         else:
-            self.log.error(
+            logging.getLogger("HWR").error(
                 "MiniDiff: zoom motor is not defined in minidiff equipment %s",
-                str(self.name),
+                str(self.name()),
             )
         if self.sampleXMotor is not None:
             self.connect(
@@ -195,9 +260,9 @@ class MiniDiff(HardwareObject):
                 self.sampleXMotor, "valueChanged", self.emit_diffractometer_moved
             )
         else:
-            self.log.error(
+            logging.getLogger("HWR").error(
                 "MiniDiff: sampx motor is not defined in minidiff equipment %s",
-                str(self.name),
+                str(self.name()),
             )
         if self.sampleYMotor is not None:
             self.connect(
@@ -208,15 +273,24 @@ class MiniDiff(HardwareObject):
                 self.sampleYMotor, "valueChanged", self.emit_diffractometer_moved
             )
         else:
-            self.log.error(
+            logging.getLogger("HWR").error(
                 "MiniDiff: sampx motor is not defined in minidiff equipment %s",
-                str(self.name),
+                str(self.name()),
             )
-
+        # if HWR.beamline.sample_view.camera is None:
+        #     logging.getLogger("HWR").error(
+        #         "MiniDiff: camera is not defined in minidiff equipment %s",
+        #         str(self.name()),
+        #     )
+        # else:
+        #     self.imgWidth, self.imgHeight = (
+        #         HWR.beamline.sample_view.camera.get_width(),
+        #         HWR.beamline.sample_view.camera.get_height(),
+        #     )
         if HWR.beamline.sample_changer is None:
-            self.log.warning(
+            logging.getLogger("HWR").warning(
                 "MiniDiff: sample changer is not defined in minidiff equipment %s",
-                str(self.name),
+                str(self.name()),
             )
         else:
             try:
@@ -226,15 +300,15 @@ class MiniDiff(HardwareObject):
                     self.sampleChangerSampleIsLoaded,
                 )
             except Exception:
-                self.log.exception(
+                logging.getLogger("HWR").exception(
                     "MiniDiff: could not connect to sample changer smart magnet"
                 )
         if self.lightWago is not None:
             self.connect(self.lightWago, "wagoStateChanged", self.wagoLightStateChanged)
         else:
-            self.log.warning(
+            logging.getLogger("HWR").warning(
                 "MiniDiff: wago light is not defined in minidiff equipment %s",
-                str(self.name),
+                str(self.name()),
             )
         if self.aperture is not None:
             self.connect(
@@ -244,51 +318,6 @@ class MiniDiff(HardwareObject):
 
         # Agree on a correct method name, inconsistent arguments for move_to_beam, disabled temporarily
         # self.move_to_coord = self.move_to_beam()
-
-    def set_rotation_axis_position(self, value: float):
-        self._set_rotation_axis_position(value, motor_name="phiz")
-
-    def _set_rotation_axis_position(self, value: float, motor_name="phiz"):
-        self.log.info(f"Setting rotation axis ({motor_name}) position to {value}")
-
-        try:
-            fname = self.get_xml_path()
-            self.log.info(f"Updating {fname}")
-
-            tree = ET.parse(fname)
-            motor_tag = (
-                tree.getroot()
-                .findall("centringReferencePosition")[0]
-                .findall(motor_name)
-            )
-            motor_tag.text = str(value)
-            tree.write(fname)
-        except:
-            self.log.info(f"Could not update {fname}")
-            # raise
-        else:
-            self.log.info(f"Wrote {fname}")
-
-        if motor_name == "phiz":
-            self.centringPhiz = sample_centring.CentringMotor(
-                self.phizMotor, reference_position=value
-            )
-        elif motor_name == "phiy":
-            self.centringPhiy = sample_centring.CentringMotor(
-                self.phiyMotor, reference_position=value
-            )
-
-        script_name = (
-            "Change_AlignmentZ" if motor_name == "phiz" else "Change_AlignmentY"
-        )
-
-        try:
-            self.log.info(f"Setting MD Alignment reference position")
-            print(f" script name {script_name} value {value}")
-            self.run_script(f"{script_name}, {value}")
-        except:
-            self.log.exception(f"Setting MD Alignment reference position failed")
-            raise
 
     # Contained Objects
     # NBNB Temp[orary hack - should be cleaned up together with configuration
@@ -376,6 +405,14 @@ class MiniDiff(HardwareObject):
         """
         return self.zoomMotor
 
+    def save_snapshot(self, filename):
+        set_light_in(self.lightWago, self.lightMotor, self.zoomMotor)
+        img = myimage(self._drawing)
+        img.save(filename)
+
+    def set_light_in(self):
+        set_light_in(self.lightWago, self.lightMotor, self.zoomMotor)
+
     def set_sample_info(self, sample_info):
         self.currentSampleInfo = sample_info
 
@@ -383,7 +420,19 @@ class MiniDiff(HardwareObject):
         self.emit("diffractometerMoved", ())
 
     def is_ready(self):
-        return self.get_state() and self.get_state().name == "READY"
+        return self.is_valid() and not any(
+            [
+                m.motorIsMoving()
+                for m in (
+                    self.sampleXMotor,
+                    self.sampleYMotor,
+                    self.zoomMotor,
+                    self.phiMotor,
+                    self.phizMotor,
+                    self.phiyMotor,
+                )
+            ]
+        )
 
     def is_valid(self):
         return (
@@ -426,13 +475,14 @@ class MiniDiff(HardwareObject):
 
     def getCalibrationData(self, offset):
         if self.zoomMotor is not None:
-            for position in self.zoomMotor.get_property("positions", ()):
-                if abs(position["offset"] - offset) <= self.zoomMotor.delta:
-                    calibrationData = position["calibrationData"]
-                    return (
-                        float(calibrationData.pixelsPerMmY) or 0,
-                        float(calibrationData.pixelsPerMmZ) or 0,
-                    )
+            if self.zoomMotor.has_object("positions"):
+                for position in self.zoomMotor["positions"]:
+                    if abs(position.offset - offset) <= self.zoomMotor.delta:
+                        calibrationData = position["calibrationData"]
+                        return (
+                            float(calibrationData.pixelsPerMmY) or 0,
+                            float(calibrationData.pixelsPerMmZ) or 0,
+                        )
         return (None, None)
 
     def get_pixels_per_mm(self):
@@ -452,7 +502,6 @@ class MiniDiff(HardwareObject):
         self.emit("zoomMotorPredefinedPositionChanged", (positionName, offset))
 
     def zoomMotorStateChanged(self, state):
-        HWR.beamline.beam.re_emit_values()
         self.emit("zoomMotorStateChanged", (state,))
         self.emit("minidiffStateChanged", (state,))
 
@@ -546,69 +595,12 @@ class MiniDiff(HardwareObject):
             self.centringSampley.set_value(sampy)
             self.centringPhiy.set_value(-phiy)
         except Exception:
-            self.log.exception("MiniDiff: could not center to beam, aborting")
+            logging.getLogger("HWR").exception(
+                "MiniDiff: could not center to beam, aborting"
+            )
 
     def getAvailableCentringMethods(self):
         return self.centringMethods.keys()
-
-    def run_custom_centring_script(self, method, sample_info):
-        try:
-            if method == "Manual 3-click":
-                self.wait_ready(30)
-                fun = self.centringMethods[method]
-            else:
-                time.sleep(0.5)
-                self.wait_ready(60)
-                self.log.info("Using MD script for sample centring")
-                self.run_script("sample_centering")
-                time.sleep(0.5)
-                self.wait_ready(120)
-
-                # if the centering fails move to the next sample
-                try:
-                    res_centering = self.get_last_task_info()
-                    if (
-                        res_centering[0].endswith("sample_centering.java")
-                        and res_centering[6] == "-1"
-                    ):
-                        self.log.exception("MiniDiff: problem while centring")
-                        self.emitCentringFailed()
-                    else:
-                        self.log.info(
-                            "MiniDiff: centring went fine with %s" % str(res_centering)
-                        )
-                except:
-                    self.log.exception("MD script for sample centering had a problem")
-
-        except KeyError as diag:
-            self.log.error("MiniDiff: unknown centring method (%s)" % str(diag))
-            self.emitCentringFailed()
-        else:
-            try:
-                if method == "Manual 3-click":
-                    fun(sample_info)
-                else:
-                    pass
-
-            except Exception:
-                self.log.exception("MiniDiff: problem while centring")
-                self.emitCentringFailed()
-
-    def run_standard_centring(self, method, sample_info):
-        self.emitCentringStarted(method)
-
-        try:
-            self.wait_ready(30)
-            fun = self.centringMethods[method]
-        except KeyError as diag:
-            self.log.error("MiniDiff: unknown centring method (%s)" % str(diag))
-            self.emitCentringFailed()
-        else:
-            try:
-                fun(sample_info)
-            except Exception:
-                self.log.exception("MiniDiff: problem while centring")
-                self.emitCentringFailed()
 
     def start_centring_method(self, method, sample_info=None):
         if not self.do_centring:
@@ -621,8 +613,8 @@ class MiniDiff(HardwareObject):
             self.emitCentringSuccessful()
             return
 
-        if self.current_centring_procedure is not None:
-            self.log.error(
+        if self.currentCentringMethod is not None:
+            logging.getLogger("HWR").error(
                 "MiniDiff: already in centring method %s" % self.currentCentringMethod
             )
             return
@@ -630,22 +622,31 @@ class MiniDiff(HardwareObject):
         curr_time = time.strftime("%Y-%m-%d %H:%M:%S")
         self.centringStatus = {"valid": False, "startTime": curr_time}
 
-        _use_custom = self.get_property("use_custom_centring_script", False)
+        self.emitCentringStarted(method)
 
-        if _use_custom:
-            self.run_custom_centring_script(method, sample_info)
+        try:
+            self.wait_ready(30)
+            fun = self.centringMethods[method]
+        except KeyError as diag:
+            logging.getLogger("HWR").error(
+                "MiniDiff: unknown centring method (%s)" % str(diag)
+            )
+            self.emitCentringFailed()
         else:
-            self.run_standard_centring(method, sample_info)
+            try:
+                fun(sample_info)
+            except Exception:
+                logging.getLogger("HWR").exception("MiniDiff: problem while centring")
+                self.emitCentringFailed()
 
     def cancel_centring_method(self, reject=False):
         if self.current_centring_procedure is not None:
             try:
-                self.current_centring_procedure.kill(block=True)
+                self.current_centring_procedure.kill()
             except Exception:
-                self.log.exception("MiniDiff: problem aborting the centring method")
-
-            self.log.exception("MiniDiff: Centring canceled")
-
+                logging.getLogger("HWR").exception(
+                    "MiniDiff: problem aborting the centring method"
+                )
             try:
                 fun = self.cancel_centring_methods[self.currentCentringMethod]
             except KeyError as diag:
@@ -661,19 +662,17 @@ class MiniDiff(HardwareObject):
         self.emitProgressMessage("")
 
         if reject:
-            self.reject_centring()
-
-        self.wait_ready(30)
+            self.rejectCentring()
 
     def currentCentringMethod(self):
         return self.currentCentringMethod
 
-    def save_current_position(self):
+    def saveCurrentPos(self):
         self.centringStatus["motors"] = self.get_positions()
         self.accept_centring()
 
     def start_manual_centring(self, sample_info=None):
-        self.log.info("Starting centring procedure ...")
+        logging.getLogger("HWR").info("Starting centring procedure ...")
 
         beam_pos_x, beam_pos_y = HWR.beamline.beam.get_beam_position_on_screen()
 
@@ -829,21 +828,18 @@ class MiniDiff(HardwareObject):
             logging.error("Could not complete automatic centring")
             logging.getLogger("user_level_log").info("Automatic loop centring failed")
             self.emitCentringFailed()
-            self.reject_centring()
+            self.rejectCentring()
         else:
             if res is None:
                 logging.error("Could not complete automatic centring")
-                logging.getLogger("user_level_log").info(
-                    "Automatic loop centring failed"
-                )
+                logging.getLogger("user_level_log").info("Automatic loop centring failed")
                 self.emitCentringFailed()
-                self.reject_centring()
+                self.rejectCentring()
             else:
                 self.emitCentringSuccessful()
-                self.accept_centring()
-                logging.getLogger("user_level_log").info(
-                    "Automatic loop centring successful"
-                )
+                if not self.user_confirms_centring:
+                    self.accept_centring()
+                logging.getLogger("user_level_log").info("Automatic loop centring successful")
 
     def start_auto_centring(self, sample_info=None, loop_only=False):
         beam_pos_x, beam_pos_y = HWR.beamline.beam.get_beam_position_on_screen()
@@ -851,8 +847,9 @@ class MiniDiff(HardwareObject):
         self.set_phase("centring", wait=True)
 
         self.wait_ready(30)
+
         self.current_centring_procedure = sample_centring.start_auto(
-            HWR.beamline.sample_view,
+            HWR.beamline.sample_view.camera,
             {
                 "phi": self.centringPhi,
                 "phiy": self.centringPhiy,
@@ -877,11 +874,9 @@ class MiniDiff(HardwareObject):
     def moveToCentredPosition(self, centred_position):
         return self.move_motors(centred_position.as_dict())
 
-    def image_clicked(self, x, y, xi, yi):
-        logging.getLogger("user_level_log").info(
-            "Centring click at, x: %s, y: %s" % (int(x), int(y))
-        )
-        sample_centring.user_click(x, y, True)
+    def imageClicked(self, x, y, xi, yi):
+        logging.getLogger("user_level_log").info("Centring click at, x: %s, y: %s" % (int(x), int(y)))
+        sample_centring.user_click(x, y, False)
 
     def emitCentringStarted(self, method):
         self.currentCentringMethod = method
@@ -889,18 +884,12 @@ class MiniDiff(HardwareObject):
         logging.getLogger("user_level_log").info("Starting centring")
 
     def accept_centring(self):
-        self.save_centring_positions()
         self.centringStatus["valid"] = True
         self.centringStatus["accepted"] = True
         self.emit("centringAccepted", (True, self.get_centring_status()))
-
-        # save position in MD2 software
-        self.save_centring_positions()
-
-        self.log.info("DEBUG %s" % self.get_centring_status())
         logging.getLogger("user_level_log").info("Centring successful")
 
-    def reject_centring(self):
+    def rejectCentring(self):
         if self.current_centring_procedure:
             self.current_centring_procedure.kill()
         self.centringStatus = {"valid": False}
@@ -939,12 +928,12 @@ class MiniDiff(HardwareObject):
             self.currentCentringMethod = None
             self.current_centring_procedure = None
         else:
-            self.log.debug(
+            logging.getLogger("HWR").debug(
                 "MiniDiff: trying to emit centringSuccessful outside of a centring"
             )
 
     def emitProgressMessage(self, msg=None):
-        # self.log.debug("%s: %s", self.name, msg)
+        # logging.getLogger("HWR").debug("%s: %s", self.name(), msg)
         self.emit("progressMessage", (msg,))
 
     def get_centring_status(self):
@@ -959,9 +948,9 @@ class MiniDiff(HardwareObject):
             "sampx": float(self.sampleXMotor.get_value()),
             "sampy": float(self.sampleYMotor.get_value()),
             "kappa": float(self.kappaMotor.get_value()) if self.kappaMotor else None,
-            "kappa_phi": (
-                float(self.kappaPhiMotor.get_value()) if self.kappaPhiMotor else None
-            ),
+            "kappa_phi": float(self.kappaPhiMotor.get_value())
+            if self.kappaPhiMotor
+            else None,
             "zoom": float(self.zoomMotor.get_value()),
         }
 
@@ -993,25 +982,25 @@ class MiniDiff(HardwareObject):
         ):
             time.sleep(0.1)
 
-    def take_snapshot(self, image_path_list: list) -> None:
-        if len(image_path_list) > 0:
-            if self.get_current_phase() != "Centring":
-                use_custom_snapshot_routine = self.get_property(
-                    "custom_snapshot_script_dir", False
-                )
+    def take_snapshots(self, image_count, wait=False):
+        HWR.beamline.sample_view.camera.forceUpdate = True
 
-            if not use_custom_snapshot_routine:
-                self.set_phase("Centring", wait=True, timeout=200)
+        snapshotsProcedure = gevent.spawn(
+            take_snapshots,
+            image_count,
+            self.lightWago,
+            self.lightMotor,
+            self.phiMotor,
+            self.zoomMotor,
+            self._drawing,
+        )
+        self.emit("centringSnapshots", (None,))
+        self.emitProgressMessage("Taking snapshots")
+        self.centringStatus["images"] = []
+        snapshotsProcedure.link(self.snapshotsDone)
 
-        for image_path in image_path_list:
-            snapshot_index = image_path_list.index(image_path)
-            logging.getLogger("user_level_log").info(
-                f"Taking {snapshot_index + 1} sample snapshot(s)"
-            )
-            HWR.beamline.sample_view.save_snapshot(path=image_path)
-            # do not move 90 degrees if not needed
-            if not self.in_plate_mode() and snapshot_index < len(image_path_list) - 1:
-                self.phiMotor.set_value_relative(90, timeout=5)
+        if wait:
+            self.centringStatus["images"] = snapshotsProcedure.get()
 
     def snapshotsDone(self, snapshotsProcedure):
         HWR.beamline.sample_view.camera.forceUpdate = False
@@ -1019,7 +1008,9 @@ class MiniDiff(HardwareObject):
         try:
             self.centringStatus["images"] = snapshotsProcedure.get()
         except Exception:
-            self.log.exception("MiniDiff: could not take crystal snapshots")
+            logging.getLogger("HWR").exception(
+                "MiniDiff: could not take crystal snapshots"
+            )
             self.emit("centringSnapshots", (False,))
             self.emitProgressMessage("")
         else:
@@ -1033,50 +1024,3 @@ class MiniDiff(HardwareObject):
 
     def wait_ready(self, timeout=None):
         pass
-
-    def get_head_configuration(self) -> Union[GonioHeadConfiguration, None]:
-        chip_def_fpath = self.get_property("chip_definition_file", "")
-        chip_def_fpath = HWR.get_hardware_repository().find_in_repository(
-            chip_def_fpath
-        )
-
-        data = None
-
-        if chip_def_fpath and os.path.isfile(chip_def_fpath):
-            with open(chip_def_fpath, "r") as _f:
-                chip_def = json.load(_f)
-
-                try:
-                    data = GonioHeadConfiguration(**chip_def)
-                except ValidationError:
-                    self.log.exception("Validation error in %s" % chip_def_fpath)
-
-        return data
-
-    def set_head_configuration(self, str_data: str) -> None:
-        data = json.loads(str_data)
-
-        chip_def_fpath = self.get_property("chip_definition_file", "")
-        chip_def_fpath = HWR.get_hardware_repository().find_in_repository(
-            chip_def_fpath
-        )
-
-        if chip_def_fpath and os.path.isfile(chip_def_fpath):
-            with open(chip_def_fpath, "w+") as _f:
-                try:
-                    GonioHeadConfiguration(**data)
-                except ValidationError:
-                    self.log.exception("Validation error in %s" % chip_def_fpath)
-
-                _f.write(json.dumps(data, indent=4))
-
-    def set_chip_layout(self, layout_name: str) -> True:
-        data = self.get_head_configuration().dict()
-        data["current"] = layout_name
-        self.set_head_configuration(json.dumps(data))
-
-    def run_script(self, script_cmd, wait=True):
-        self._run_script(script_cmd)
-
-        if wait:
-            self._wait_ready(300)

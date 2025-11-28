@@ -1,10 +1,8 @@
 import logging
-import sys
-import time
-
-import gevent
 import PyTango.gevent
-
+import gevent
+import time
+import sys
 from mxcubecore import BaseHardwareObjects
 from mxcubecore import HardwareRepository as HWR
 
@@ -26,7 +24,9 @@ class ID29HutchTrigger(BaseHardwareObjects.HardwareObject):
             self.device = PyTango.gevent.DeviceProxy(self.get_property("tangoname"))
         except PyTango.DevFailed as traceback:
             last_error = traceback[-1]
-            self.log.error("%s: %s", str(self.name()), last_error["desc"])
+            logging.getLogger("HWR").error(
+                "%s: %s", str(self.name()), last_error["desc"]
+            )
             self.device = None
 
         self.pollingTask = None
@@ -40,8 +40,6 @@ class ID29HutchTrigger(BaseHardwareObjects.HardwareObject):
             self.card, self.channel = map(int, PSSinfo.split("/"))
         except Exception:
             logging.getLogger().error("%s: cannot find PSS number", self.name())
-
-            self.log.exception("")
             return
 
         if self.device is not None:
@@ -65,7 +63,7 @@ class ID29HutchTrigger(BaseHardwareObjects.HardwareObject):
 
     def macro(self, entering_hutch, old={"dtox": None}):
         logging.info(
-            "%s: %s hutch", self.id, "entering" if entering_hutch else "leaving"
+            "%s: %s hutch", self.name(), "entering" if entering_hutch else "leaving"
         )
         dtox = HWR.beamline.detector.distance
         if not entering_hutch:

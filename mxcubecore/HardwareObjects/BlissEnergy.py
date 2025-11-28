@@ -1,4 +1,4 @@
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -17,38 +17,28 @@
 #  along with MXCuBE. If not, see <http://www.gnu.org/licenses/>.
 """
 Energy and Wavelength with bliss.
-Example yaml file:
-- for tunable wavelength beamline:
-.. code-block:: yaml
+Example xml file:
+  - for tunable wavelength beamline:
+<object class="Energy">
+  <object href="/energy" role="energy_motor"/>
+  <object href="/bliss" role="bliss"/>
+</object>
+The energy should have methods get_value, get_limits and move.
+If used, the controller should have method moveEnergy.
 
- class: BlissEnergy.BlissEnergy
- configuration:
-   username: Energy
- objects:
-   controller: bliss.yml
-   energy_motor: energy_motor.yml
-
-- for fixed wavelength beamline:
-.. code-block:: yaml
-
- class: BlissEnergy.BlissEnergy
- configuration:
-   username: Energy
-   read_only: True
-   default_value: 12.8123
-
+  - for fixed wavelength beamline:
+<object class="Energy">
+  <read_only>True</read_only>
+  <energy>12.8123</energy>
+</object>
 """
-
 import logging
 import math
-
 from gevent import spawn
-
-from mxcubecore import HardwareRepository as HWR
-from mxcubecore.BaseHardwareObjects import HardwareObjectState
 from mxcubecore.HardwareObjects.abstract.AbstractEnergy import AbstractEnergy
+from mxcubecore.BaseHardwareObjects import HardwareObjectState
 
-__copyright__ = """ Copyright © by the MXCuBE collaboration """
+__copyright__ = """ Copyright © 2019 by the MXCuBE collaboration """
 __license__ = "LGPLv3+"
 
 
@@ -56,39 +46,33 @@ class BlissEnergy(AbstractEnergy):
     """Energy and Wavelength with bliss."""
 
     def __init__(self, name):
-        super().__init__(name)
-        self.energy_motor = None
-        self.controller = None
+        AbstractEnergy.__init__(self, name)
+        self._energy_motor = None
+        self._bliss_session = None
         self._cmd_execution = None
 
     def init(self):
         """Initialisation"""
-        super().init()
-
-        self.controller = self.get_object_by_role("controller")
-        self.energy_motor = self.get_object_by_role("energy_motor")
+        AbstractEnergy.init(self)
+        self._energy_motor = self.get_object_by_role("energy_motor")
+        self._bliss_session = self.get_object_by_role("bliss")
         self.update_state(HardwareObjectState.READY)
 
-        if self.energy_motor:
-            self.update_state(self.energy_motor.get_state())
-            self.energy_motor.connect("valueChanged", self.update_value)
-            self.energy_motor.connect("stateChanged", self.update_state)
+        if self._energy_motor:
+            self.update_state(self._energy_motor.get_state())
+            self._energy_motor.connect("valueChanged", self.update_value)
+            self._energy_motor.connect("stateChanged", self.update_state)
 
-        if self.read_only and not self.energy_motor:
-            # self._nominal_value = float(self.get_property("energy", 0))
-            try:
-                self._nominal_value = float(self.default_value)
-            except TypeError as err:
-                msg = "Energy not defined"
-                raise RuntimeError(msg) from err
+        if self.read_only:
+            self._nominal_value = float(self.get_property("energy", 0))
 
     def get_value(self):
         """Read the energy.
         Returns:
             (float): Energy [keV]
         """
-        if self.energy_motor:
-            self._nominal_value = self.energy_motor.get_value()
+        if not self.read_only:
+            self._nominal_value = self._energy_motor.get_value()
         return self._nominal_value
 
     def get_limits(self):
@@ -97,12 +81,12 @@ class BlissEnergy(AbstractEnergy):
             (tuple): two floats tuple (low limit, high limit) [keV].
         """
         if not self.read_only:
-            self._nominal_limits = self.energy_motor.get_limits()
+            self._nominal_limits = self._energy_motor.get_limits()
         return self._nominal_limits
 
     def stop(self):
         """Stop the energy motor movement"""
-        self.energy_motor.stop()
+        self._energy_motor.stop()
 
     def _set_value(self, value):
         """Execute the sequence to move to an energy
@@ -110,16 +94,9 @@ class BlissEnergy(AbstractEnergy):
             value (float): target energy
         """
         try:
-            defocus = HWR.beamline.beam.definer.defocused_beam
-        except AttributeError:
-            defocus = False
-
-        self.update_state(HardwareObjectState.BUSY)
-        try:
-            self.controller.change_energy(value, defocus=defocus)
-        except (AttributeError, RuntimeError):
-            self.energy_motor.set_value(value)
-        self.update_state(HardwareObjectState.READY)
+            self._bliss_session.change_energy(value)
+        except RuntimeError:
+            self._energy_motor.set_value(value)
 
     def set_value(self, value, timeout=0):
         """Move energy to absolute position. Wait the move to finish.
@@ -129,7 +106,7 @@ class BlissEnergy(AbstractEnergy):
                              If timeout == 0: return at once and do not wait
                              if timeout is None: wait forever.
         Raises:
-            ValueError: Value not valid or attempt to set write only actuator.
+            ValueError: Value not valid or attemp to set write only actuator.
         """
         if self.read_only:
             return
@@ -139,12 +116,12 @@ class BlissEnergy(AbstractEnergy):
 
             _delta = math.fabs(current_value - value)
             if _delta < 0.001:
-                logging.getLogger("user_level_log").info(
+                logging.getLogger("user_level_log").debug(
                     "Energy: already at %g, not moving", value
                 )
                 return
 
-            logging.getLogger("user_level_log").info(
+            logging.getLogger("user_level_log").debug(
                 "Energy: moving energy to %g", value
             )
 
@@ -152,12 +129,11 @@ class BlissEnergy(AbstractEnergy):
                 if timeout:
                     self._set_value(value)
                 else:
-                    self._cmd_execution = spawn(self._set_value, value)
+                    self._cmd_execution = spawn(self._set_value(value))
             else:
-                self.energy_motor.set_value(value, timeout=timeout)
+                self._energy_motor.set_value(value, timeout=timeout)
         else:
-            msg = f"Invalid value {value}"
-            raise ValueError(msg)
+            raise ValueError("Invalid value %s" % str(value))
 
     def abort(self):
         """Abort the procedure"""

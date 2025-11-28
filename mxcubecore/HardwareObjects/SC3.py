@@ -1,15 +1,7 @@
+from mxcubecore.HardwareObjects.abstract.AbstractSampleChanger import *
+
 import xml.sax
 from xml.sax.handler import ContentHandler
-
-from mxcubecore.HardwareObjects.abstract.AbstractSampleChanger import (
-    Container,
-    Sample,
-    SampleChanger,
-    SampleChangerMode,
-    SampleChangerState,
-    gevent,
-    sys,
-)
 
 
 class Pin(Sample):
@@ -374,7 +366,7 @@ class SC3(SampleChanger):
                         Pin.get_sample_address(basket_no, sample_no)
                     )
         except Exception:
-            self.log.exception("")
+            pass
         self._set_selected_component(basket)
         self._set_selected_sample(sample)
 

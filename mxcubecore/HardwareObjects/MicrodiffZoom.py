@@ -1,6 +1,6 @@
 # encoding: utf-8
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -33,7 +33,7 @@ EL6": 6}</values>
 """
 
 from enum import Enum
-
+from mxcubecore.HardwareObjects.abstract.AbstractNState import BaseValueEnum
 from mxcubecore.HardwareObjects.ExporterNState import ExporterNState
 
 __copyright__ = """ Copyright © 2020 by the MXCuBE collaboration """
@@ -43,11 +43,15 @@ __license__ = "LGPLv3+"
 class MicrodiffZoom(ExporterNState):
     """MicrodiffZoom class"""
 
+    def __init__(self, name):
+        ExporterNState.__init__(self, name)
+
     def init(self):
         """Initialize the zoom"""
-        super().init()
+        ExporterNState.init(self)
 
-        # check if we have values other that UNKNOWN
+        self.initialise_values()
+        # check if we have values other that UKNOWN
         _len = len(self.VALUES) - 1
         if _len > 0:
             # we can only assume that the values are consecutive integers
@@ -65,16 +69,6 @@ class MicrodiffZoom(ExporterNState):
         """
         self._nominal_limits = limits
 
-    def update_value(self, value=None):
-        """Check if the value has changed. Emits signal valueChanged.
-        Args:
-            value: value
-        """
-        # Make sure that update value of super class always is passed value=None
-        # so that _get_value is called to get the Enum value and not the numeric
-        # value passed by underlying event data.
-        super().update_value()
-
     def update_limits(self, limits=None):
         """Check if the limits have changed. Emits signal limitsChanged.
         Args:
@@ -91,10 +85,10 @@ class MicrodiffZoom(ExporterNState):
         """Initialise the ValueEnum from the limits"""
         low, high = self.get_limits()
 
-        values = {f"LEVEL{v}": v for v in range(low, high + 1)}
+        values = {"LEVEL%s" % str(v): v for v in range(low, high + 1)}
         self.VALUES = Enum(
             "ValueEnum",
-            dict(values, **{item.name: item.value for item in self.VALUES}),
+            dict(values, **{item.name: item.value for item in BaseValueEnum}),
         )
 
     def _get_range(self):
@@ -104,7 +98,7 @@ class MicrodiffZoom(ExporterNState):
         """
         try:
             _low, _high = self._exporter.execute("getZoomRange")
-        except (AttributeError, ValueError):
+        except Exception:
             _low, _high = 1, 10
 
         # inf is a problematic value

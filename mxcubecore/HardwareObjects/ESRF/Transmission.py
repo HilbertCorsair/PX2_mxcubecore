@@ -1,6 +1,6 @@
 # encoding: utf-8
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -17,7 +17,7 @@
 #
 #  You should have received a copy of the GNU General Lesser Public License
 #  along with MXCuBE. If not, see <http://www.gnu.org/licenses/>.
-"""Transmission with bliss"""
+"""Transmission with bliss """
 
 from mxcubecore.HardwareObjects.abstract.AbstractTransmission import (
     AbstractTransmission,
@@ -48,8 +48,10 @@ class Transmission(AbstractTransmission):
         Args:
             value(float): Transmission [%]
         """
-        self.update_state(self.STATES.BUSY)
         self._transmission.set(value)
+
+        # Busy is set by AbstractActuator, simply set state to ready
+        # when done so that ready event is set.
         self.update_state(self.STATES.READY)
 
     def get_value(self):

@@ -1,5 +1,4 @@
-from mxcubecore.model import queue_model_objects
-from mxcubecore.queue_entry import *
+from mxcubecore.HardwareObjects.queue_entry import *
 
 
 class PX2DataCollectionQueueEntry(DataCollectionQueueEntry):
@@ -57,10 +56,8 @@ class PX2DataCollectionQueueEntry(DataCollectionQueueEntry):
                     log.info("Moving sample to given position ...")
                     list_item.setText(1, "Moving sample")
                     HWR.beamline.sample_view.select_shape_with_cpos(cpos)
-                    self.centring_task = (
-                        HWR.beamline.diffractometer.moveToCentredPosition(
-                            cpos, wait=False
-                        )
+                    self.centring_task = HWR.beamline.diffractometer.moveToCentredPosition(
+                        cpos, wait=False
                     )
                     self.centring_task.get()
                 else:
@@ -73,9 +70,7 @@ class PX2DataCollectionQueueEntry(DataCollectionQueueEntry):
                     )
 
                 param_list = queue_model_objects.to_collect_dict(
-                    dc,
-                    sample,
-                    cpos if cpos != empty_cpos else None,
+                    dc, self.session, sample,  cpos if cpos != empty_cpos else None,
                 )
                 self.collect_task = HWR.beamline.collect.collect(
                     COLLECTION_ORIGIN_STR.MXCUBE, param_list
@@ -92,7 +87,7 @@ class PX2DataCollectionQueueEntry(DataCollectionQueueEntry):
                 list_item.setText(1, "Stopped")
                 raise QueueAbortedException("queue stopped by user", self)
             except Exception as ex:
-                self.log.exception("")
+                print(traceback.print_exc())
                 raise QueueExecutionException(ex.message, self)
         else:
             log.error(
@@ -136,7 +131,7 @@ class PX2EnergyScanQueueEntry(EnergyScanQueueEntry):
                 scan_file_path,
             )
         )
-        egy_result = HWR.beamline.energy_scan.do_chooch(
+        egy_result = HWR.beamline.energy_scan.doChooch(
             energy_scan.element_symbol,
             energy_scan.edge,
             scan_file_archive_path,

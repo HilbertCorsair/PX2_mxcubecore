@@ -1,13 +1,22 @@
-from beam_center import beam_center
-from resolution import resolution
-
+import logging
 from mxcubecore.HardwareObjects.abstract.AbstractResolution import AbstractResolution
+from mxcubecore import HardwareRepository as HWR
 
+try:
+    from resolution import resolution, resolution_mockup
+    from beam_center import beam_center
+except ModuleNotFoundError:
+    from experimental_methods import (
+        resolution, 
+        resolution_mockup, 
+        beam_center,
+    )
 
 class PX2Resolution(AbstractResolution):
     def __init__(self, name):
         super(PX2Resolution, self).__init__(name)
         self.resolution_motor = resolution()
+        # self.resolution_motor = resolution_mockup()
         self.beam_center = beam_center()
 
     def connect_notify(self, signal):

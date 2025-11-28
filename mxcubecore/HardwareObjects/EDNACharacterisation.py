@@ -1,52 +1,47 @@
-import binascii
+import os
 import copy
 import logging
-import os
+import binascii
 import subprocess
-import time
-from typing import List
 
+from mxcubecore.HardwareObjects import queue_model_objects as qmo
+from mxcubecore.HardwareObjects import queue_model_enumerables as qme
+
+from mxcubecore.HardwareObjects.SecureXMLRpcRequestHandler import SecureXMLRpcRequestHandler
 from mxcubecore import HardwareRepository as HWR
-from mxcubecore.HardwareObjects.abstract.AbstractCharacterisation import (
-    AbstractCharacterisation,
-)
-from mxcubecore.HardwareObjects.SecureXMLRpcRequestHandler import (
-    SecureXMLRpcRequestHandler,
-)
-from mxcubecore.HardwareObjects.XSDataCommon import (
-    XSDataAngle,
-    XSDataBoolean,
-    XSDataDouble,
-    XSDataFlux,
-    XSDataImage,
-    XSDataInteger,
-    XSDataLength,
-    XSDataSize,
-    XSDataString,
-    XSDataTime,
-    XSDataWavelength,
-)
-from mxcubecore.HardwareObjects.XSDataMXCuBEv1_4 import (
-    XSDataInputMXCuBE,
-    XSDataMXCuBEDataSet,
-    XSDataResultMXCuBE,
-)
-from mxcubecore.model import queue_model_enumerables as qme
-from mxcubecore.model import queue_model_objects as qmo
+from mxcubecore.HardwareObjects.abstract.AbstractCharacterisation import AbstractCharacterisation
+
+from XSDataMXCuBEv1_4 import XSDataInputMXCuBE
+from XSDataMXCuBEv1_4 import XSDataMXCuBEDataSet
+from XSDataMXCuBEv1_4 import XSDataResultMXCuBE
+
+from XSDataCommon import XSDataAngle
+from XSDataCommon import XSDataBoolean
+from XSDataCommon import XSDataDouble
+from XSDataCommon import XSDataFile
+from XSDataCommon import XSDataFlux
+from XSDataCommon import XSDataLength
+from XSDataCommon import XSDataTime
+from XSDataCommon import XSDataWavelength
+from XSDataCommon import XSDataInteger
+from XSDataCommon import XSDataSize
+from XSDataCommon import XSDataString
 
 # from edna_test_data import EDNA_DEFAULT_INPUT
 # from edna_test_data import EDNA_TEST_DATA
 
 
 class EDNACharacterisation(AbstractCharacterisation):
-    def __init__(self, name) -> None:
+    def __init__(self, name):
         super(EDNACharacterisation, self).__init__(name)
 
+        self.collect_obj = None
         self.result = None
         self.edna_default_file = None
         self.start_edna_command = None
 
-    def init(self) -> None:
+    def init(self):
+        self.collect_obj = self.get_object_by_role("collect")
         self.start_edna_command = self.get_property("edna_command")
         self.edna_default_file = self.get_property("edna_default_file")
 
@@ -61,7 +56,7 @@ class EDNACharacterisation(AbstractCharacterisation):
         with open(fp, "r") as f:
             self.edna_default_input = "".join(f.readlines())
 
-    def _modify_strategy_option(self, diff_plan, strategy_option) -> None:
+    def _modify_strategy_option(self, diff_plan, strategy_option):
         """Method for modifying the diffraction plan 'strategyOption' entry"""
         if diff_plan.getStrategyOption() is None:
             new_strategy_option = strategy_option
@@ -72,51 +67,28 @@ class EDNACharacterisation(AbstractCharacterisation):
 
         diff_plan.setStrategyOption(XSDataString(new_strategy_option))
 
-    def _run_edna(
-        self, input_file, results_file, process_directory
-    ) -> XSDataResultMXCuBE:
+    def _run_edna(self, input_file, results_file, process_directory):
         """Starts EDNA"""
         msg = "Starting EDNA characterisation using xml file %s" % input_file
         logging.getLogger("queue_exec").info(msg)
-        self.characterisationResult = None
+
         args = (self.start_edna_command, input_file, results_file, process_directory)
-        # subprocess.call("%s %s %s %s" % args, shell=True)
-        p = subprocess.Popen("%s %s %s %s --verbose --debug" % args, shell=True)
+        subprocess.call("%s %s %s %s" % args, shell=True)
 
-        do_continue = True
         self.result = None
-        start_time = time.time()
-        TIME_OUT = 120
-        while do_continue:
-            if self.characterisationResult is not None:
-                logging.getLogger("queue_exec").info(
-                    "Received characterisation results via XMLRPC"
-                )
-                self.result = XSDataResultMXCuBE.parseString(
-                    self.characterisationResult
-                )
-                do_continue = False
-            elif p.poll() is not None:
-                do_continue = False
-            elif time.time() - start_time > TIME_OUT:
-                do_continue = False
-            if do_continue:
-                logging.getLogger("queue_exec").info(
-                    "Waiting for characterisation results..."
-                )
-                time.sleep(1)
-
-        if self.result is None and os.path.exists(results_file):
+        if os.path.exists(results_file):
             self.result = XSDataResultMXCuBE.parseFile(results_file)
 
         return self.result
 
-    def get_html_report(self, edna_result) -> str:
+    def get_html_report(self, edna_result):
         """
-        Returns the path to the html result report generated by the characterisation software.
-
         Args:
             output (EDNAResult) EDNAResult object
+
+        Returns:
+            (str) The path to the html result report generated by the characterisation
+            software
         """
         html_report = None
 
@@ -127,7 +99,7 @@ class EDNACharacterisation(AbstractCharacterisation):
 
         return html_report
 
-    def input_from_params(self, data_collection, char_params) -> XSDataInputMXCuBE:
+    def input_from_params(self, data_collection, char_params):
         edna_input = XSDataInputMXCuBE.parseString(self.edna_default_input)
 
         if data_collection.id:
@@ -140,7 +112,12 @@ class EDNACharacterisation(AbstractCharacterisation):
             transmission = HWR.beamline.transmission.get_value()
             beam.setTransmission(XSDataDouble(transmission))
         except AttributeError:
-            self.log.exception("EDNACharacterisation. transmission not saved ")
+            import traceback
+
+            logging.getLogger("HWR").debug(
+                "EDNACharacterisation. transmission not saved "
+            )
+            logging.getLogger("HWR").debug(traceback.format_exc())
 
         try:
             wavelength = HWR.beamline.energy.get_wavelength()
@@ -154,13 +131,13 @@ class EDNACharacterisation(AbstractCharacterisation):
             pass
 
         try:
-            min_exp_time = HWR.beamline.detector.get_exposure_time_limits()[0]
+            min_exp_time = self.collect_obj.detector_hwobj.get_exposure_time_limits()[0]
             beam.setMinExposureTimePerImage(XSDataTime(min_exp_time))
         except AttributeError:
             pass
 
         try:
-            beamsize = HWR.beamline.beam.beam_info_hwobj.get_beam_size()
+            beamsize = self.collect_obj.beam_info_hwobj.get_beam_size()
 
             if None not in beamsize:
                 beam.setSize(
@@ -200,7 +177,6 @@ class EDNACharacterisation(AbstractCharacterisation):
             diff_plan.setAimedResolution(aimed_resolution)
 
         diff_plan.setComplexity(complexity)
-        diff_plan.setStrategyType(XSDataString(char_params.strategy_program))
 
         if char_params.use_permitted_rotation:
             diff_plan.setUserDefinedRotationStart(permitted_phi_start)
@@ -249,28 +225,26 @@ class EDNACharacterisation(AbstractCharacterisation):
         path_str = os.path.join(
             path_template.directory, path_template.get_image_file_name()
         )
-        characterisation_dir = path_template.xds_dir.replace(
-            "/autoprocessing_", "/characterisation_"
-        )
-        os.makedirs(characterisation_dir, mode=0o755, exist_ok=True)
+
         for img_num in range(int(acquisition_parameters.num_images)):
-            image_file = XSDataImage()
+            image_file = XSDataFile()
             path = XSDataString()
-            path.value = path_str % (img_num + 1)
-            image_file.path = path
-            image_file.number = XSDataInteger(img_num + 1)
+            path.set_value(path_str % (img_num + 1))
+            image_file.setPath(path)
             data_set.addImageFile(image_file)
 
         edna_input.addDataSet(data_set)
-        edna_input.process_directory = characterisation_dir
+        edna_input.process_directory = path_template.process_directory
+
         return edna_input
 
-    def characterise(self, edna_input) -> str:
+    def characterise(self, edna_input):
         """
-        Runs Characterisation and returns the results.
-
         Args:
             input (EDNAInput) EDNA input object
+
+        Returns:
+            (str) The Characterisation result
         """
         self.processing_done_event.set()
         self.prepare_input(edna_input)
@@ -303,9 +277,7 @@ class EDNACharacterisation(AbstractCharacterisation):
         self.processing_done_event.clear()
         return self.result
 
-    def dc_from_output(
-        self, edna_result, reference_image_collection
-    ) -> List[qmo.DataCollection]:
+    def dc_from_output(self, edna_result, reference_image_collection):
         data_collections = []
 
         crystal = copy.deepcopy(reference_image_collection.crystal)
@@ -353,11 +325,9 @@ class EDNACharacterisation(AbstractCharacterisation):
                 )
                 acquisition_parameters = acq.acquisition_parameters
 
-                acquisition_parameters.centred_position = (
-                    reference_image_collection.acquisitions[
-                        0
-                    ].acquisition_parameters.centred_position
-                )
+                acquisition_parameters.centred_position = reference_image_collection.acquisitions[
+                    0
+                ].acquisition_parameters.centred_position
 
                 acq.path_template = HWR.beamline.get_default_path_template()
 
@@ -365,11 +335,7 @@ class EDNACharacterisation(AbstractCharacterisation):
                 # and update the members the needs to be changed. Keeping
                 # the directories of the reference collection.
                 ref_pt = reference_image_collection.acquisitions[0].path_template
-
                 acq.path_template = copy.deepcopy(ref_pt)
-                acq.path_template.directory = "/".join(
-                    ref_pt.directory.split("/")[0:-2]
-                )
                 acq.path_template.wedge_prefix = "w" + str(i + 1)
                 acq.path_template.reference_image_prefix = str()
 
@@ -444,9 +410,11 @@ class EDNACharacterisation(AbstractCharacterisation):
 
         return data_collections
 
-    def get_default_characterisation_parameters(self) -> qmo.CharacterisationParameters:
+    def get_default_characterisation_parameters(self):
         """
-        Returns the default parameters
+        Returns:
+            (queue_model_objects.CharacterisationsParameters) object with default
+            parameters.
         """
         edna_input = XSDataInputMXCuBE.parseString(self.edna_default_input)
         diff_plan = edna_input.getDiffractionPlan()
@@ -506,8 +474,9 @@ class EDNACharacterisation(AbstractCharacterisation):
 
         return char_params
 
-    def generate_new_token(self) -> str:
+    def generate_new_token(self):
         # See: https://wyattbaldwin.com/2014/01/09/generating-random-tokens-in-python/
-        token = binascii.hexlify(os.urandom(5)).decode("utf-8")
+        token = binascii.hexlify(os.urandom(5)).decode('utf-8')
         SecureXMLRpcRequestHandler.setReferenceToken(token)
         return token
+

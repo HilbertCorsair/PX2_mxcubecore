@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -19,12 +19,14 @@
 
 """EMBLBSD (Beam shaping device) represents a diffractometer without a gonio"""
 
-import logging
 import time
-
+import logging
 import gevent
 
-from mxcubecore.HardwareObjects.GenericDiffractometer import GenericDiffractometer
+from mxcubecore.HardwareObjects.GenericDiffractometer import (
+    GenericDiffractometer,
+)
+
 
 __credits__ = ["EMBL Hamburg"]
 __license__ = "LGPLv3+"
@@ -122,7 +124,7 @@ class EMBLBSD(GenericDiffractometer):
         """No need to implement"""
         return
 
-    def get_centred_point_from_coord(self, x, y, return_by_names=None):
+    def get_centred_point_from_coord(self):
         """No need to implement"""
         return
 
@@ -166,9 +168,9 @@ class EMBLBSD(GenericDiffractometer):
 
     def set_phase(self, phase, timeout=80):
         """Sets diffractometer to the selected phase.
-        In the plate mode before going to or away from
-        Transfer or Beam location phase if needed then detector
-        is moved to the safe distance to avoid collision.
+           In the plate mode before going to or away from
+           Transfer or Beam location phase if needed then detector
+           is moved to the safe distance to avoid collision.
         """
         # self.wait_device_ready(2)
         logging.getLogger("GUI").warning(

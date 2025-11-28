@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -17,31 +17,37 @@
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with MXCuBE. If not, see <http://www.gnu.org/licenses/>.
 
-"""AbstractFlux class
-Defines get_average_flux_density.
-"""
-
 from scipy.interpolate import interp1d
 
-from mxcubecore import HardwareRepository as HWR
-from mxcubecore.HardwareObjects.abstract.AbstractActuator import AbstractActuator
+from mxcubecore.HardwareObjects.abstract.AbstractActuator import (
+    AbstractActuator,
+)
 
-__copyright__ = """ Copyright © 2010-2022 by the MXCuBE collaboration """
-__license__ = "LGPLv3+"
+from mxcubecore import HardwareRepository as HWR
+
+
+__credits__ = ["MXCuBE collaboration"]
+__version__ = "2.3."
+__category__ = "General"
+
 
 
 class AbstractFlux(AbstractActuator):
-    """Class for Flux abstraction"""
+
+    read_only = True
+
 
     def __init__(self, name):
-        super().__init__(name)
-        # flux by default is read only
-        self.read_only = True
+        AbstractActuator.__init__(self, name)
 
     def init(self):
         """Initialise some parameters."""
-        super().init()
+        super(AbstractFlux, self).init()
         self.read_only = self.get_property("read_only") or True
+
+    def _set_value(self, value):
+        """Local setter function - not implemented for read_only clases"""
+        raise NotImplementedError
 
     # Dose rate for a standard composition crystal, in Gy/s
     # As a function of energy in keV
@@ -78,18 +84,27 @@ class AbstractFlux(AbstractActuator):
 
     def get_average_flux_density(self, transmission=None):
         """Get average flux density over the beam area in photons / mm^2
-        for a given transmission setting
+        for a given transmisison setting
+
         Args:
-            transmission (float): Target transmission [%]
-                                  (defaults to current value)
-        Returns:
-            (float): (photons / mm^2) - average flux density over beam area.
+            transmission (float): # Target transmission in % (defaults to current value)
+
+        Returns (photons / mm^2) : average flux density over beam area
+
         """
+
         beam_size = HWR.beamline.beam.get_beam_size()
         flux = self.get_value()
         result = None
         if flux and all(beam_size):
             result = flux / (beam_size[0] * beam_size[1])
-            if transmission is not None:
-                result *= transmission / HWR.beamline.transmission.get_value()
+            if transmission  is not None:
+                result = result * transmission / HWR.beamline.transmission.get_value()
+        #
         return result
+
+    def get_hypothetical_flux(self, transmission=None, photon_energy=None):
+        """NBNB placeholder in SOLEIL refactoring 202201
+
+        Should be refactored, possibly renamed, made consistent with other functions"""
+        return 0.0

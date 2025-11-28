@@ -1,6 +1,6 @@
 # encoding: utf-8
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -18,24 +18,20 @@
 #  You should have received a copy of the GNU General Lesser Public License
 #  along with MXCuBE. If not, see <http://www.gnu.org/licenses/>.
 """
-Example yml configuration:
-
-.. code-block:: yaml
-
- class: BlissMotor.BlissMotor
- configuration:
-   actuator_name: dtox
-   username: Detector Distance
+Example xml file:
+<device class="BlissMotor">
+  <username>Detector Distance</username>
+  <actuator_name>dtox</actuator_name>
+  <tolerance>1e-2</tolerance>
+</device>
 """
 
 import enum
-
 from bliss.config import static
-
-from mxcubecore.BaseHardwareObjects import HardwareObjectState
 from mxcubecore.HardwareObjects.abstract.AbstractMotor import AbstractMotor
+from mxcubecore.BaseHardwareObjects import HardwareObjectState
 
-__copyright__ = """ Copyright © by the MXCuBE collaboration """
+__copyright__ = """ Copyright © 2019 by the MXCuBE collaboration """
 __license__ = "LGPLv3+"
 
 
@@ -80,21 +76,20 @@ class BlissMotor(AbstractMotor):
     }
 
     def __init__(self, name):
-        super().__init__(name)
+        AbstractMotor.__init__(self, name)
         self.motor_obj = None
 
     def init(self):
         """Initialise the motor"""
-        super().init()
+        AbstractMotor.init(self)
         cfg = static.get_config()
         self.motor_obj = cfg.get(self.actuator_name)
-
-        # init state to match motor's one
-        self.update_state(self.get_state())
-
         self.connect(self.motor_obj, "position", self.update_value)
         self.connect(self.motor_obj, "state", self._update_state)
         self.connect(self.motor_obj, "move_done", self._update_state)
+
+        # init state to match motor's one
+        self.update_state(self.get_state())
 
     def _state2enum(self, state):
         """Translate the state to HardwareObjectState and BlissMotorStates
@@ -118,18 +113,17 @@ class BlissMotor(AbstractMotor):
         """
         state = HardwareObjectState.UNKNOWN
         for stat in self.motor_obj.state.current_states_names:
-            try:
+            if stat in HardwareObjectState.__members__:
                 return HardwareObjectState[stat]
-            except KeyError:
-                if stat == "DISABLED":
-                    # we need to treat DISABLED before any other auxiliary state
-                    return HardwareObjectState.OFF
-                if stat == "MOVING":
-                    # MOVING has higher priority than other auxiliary states
-                    return HardwareObjectState.BUSY
-                # finally the state will corresponf to the last in the list
-                # of the auxiliary states.
-                state = self._state2enum(stat)[0]
+            if stat == "DISABLED":
+                # we need to treat DISABLED before any other auxillary state
+                return HardwareObjectState.OFF
+            if stat == "MOVING":
+                # MOVING has higher priority than other auxillary states
+                return HardwareObjectState.BUSY
+            # finally the state will corresponf to the last in the list
+            # of the auxillary states.
+            state = self._state2enum(stat)[0]
         return state
 
     def get_specific_state(self):
@@ -199,3 +193,7 @@ class BlissMotor(AbstractMotor):
     def abort(self):
         """Stop the motor movement"""
         self.motor_obj.stop(wait=False)
+
+    def name(self):
+        """Get the motor name. Should be removed when GUI ready"""
+        return self.actuator_name

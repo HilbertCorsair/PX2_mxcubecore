@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -33,7 +33,7 @@ Based on EMBL HwObj
 
 [Commands]
 
-[Emitted signals]
+[Emited signals]
 - valuesChanged
 
 [Functions]
@@ -45,18 +45,23 @@ Based on EMBL HwObj
 
 Example Hardware Object XML file :
 ==================================
-<object class="ALBAMachineInfo">
+<equipment class="ALBAMachineInfo">
     <username>Mach</username>
     <taurusname>mach/ct/gateway</taurusname>
     <channel type="sardana" name="MachStatus" polling="1000">State</channel>
     <channel type="sardana" name="MachCurrent" polling="1000">Current</channel>
     <channel type="sardana" name="TopUpRemaining" polling="1000">TopUpRemaining</channel>
-</object>
+</equipment>
 """
 
 import logging
+import time
+from gevent import spawn
+from urllib2 import urlopen
+from datetime import datetime, timedelta
+from mxcubecore import HardwareRepository as HWR
+from mxcubecore.BaseHardwareObjects import Equipment
 
-from mxcubecore.BaseHardwareObjects import HardwareObject
 
 __author__ = "Jordi Andreu"
 __credits__ = ["MXCuBE collaboration"]
@@ -67,13 +72,13 @@ __email__ = "jandreu[at]cells.es"
 __status__ = "Draft"
 
 
-class XalocMachineInfo(HardwareObject):
+class XalocMachineInfo(Equipment):
     """
     Descript. : Displays actual information about the machine status.
     """
 
     def __init__(self, name):
-        super().__init__(name)
+        Equipment.__init__(self, name)
         """
         Descript. :
         """
@@ -136,7 +141,7 @@ class XalocMachineInfo(HardwareObject):
     def topup_remaining_changed(self, value):
         """
         Descript. : Function called if topup ramaining is changed
-        Arguments : new topup remaining (float)
+        Arguments : new topup remainin (float)
         Return    : -
         """
         self.values_dict["topup_remaining"] = value
@@ -146,7 +151,7 @@ class XalocMachineInfo(HardwareObject):
         """
         Descript. : Updates storage disc information, detects if intensity
                     and storage space is in limits, forms a value list
-                    and value in range list, both emitted by qt as lists
+                    and value in range list, both emited by qt as lists
         Arguments : -
         Return    : -
         """

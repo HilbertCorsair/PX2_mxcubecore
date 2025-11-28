@@ -1,31 +1,27 @@
+#!/usr/bin/env python
+
 #
 # Generated Mon May 14 10:32::39 2012 by EDGenerateDS.
 #
 
+from XSDataMXv1 import XSDataSampleCrystalMM
+from XSDataMXv1 import XSDataResultCharacterisation
+from XSDataMXv1 import XSDataInputCharacterisation
+from XSDataMXv1 import XSDataExperimentalCondition
+from XSDataMXv1 import XSDataDiffractionPlan
+from XSDataMXv1 import XSDataCollectionPlan
+from XSDataCommon import XSDataString
+from XSDataCommon import XSDataResult
+from XSDataCommon import XSDataInteger
+from XSDataCommon import XSDataInput
+from XSDataCommon import XSDataFile
+from XSDataCommon import XSDataDictionary
+from XSDataCommon import XSData
 import os
 import sys
-from xml.dom import (
-    Node,
-    minidom,
-)
+from xml.dom import minidom
+from xml.dom import Node
 
-from XSDataCommon import (
-    XSData,
-    XSDataDictionary,
-    XSDataFile,
-    XSDataInput,
-    XSDataInteger,
-    XSDataResult,
-    XSDataString,
-)
-from XSDataMXv1 import (
-    XSDataCollectionPlan,
-    XSDataDiffractionPlan,
-    XSDataExperimentalCondition,
-    XSDataInputCharacterisation,
-    XSDataResultCharacterisation,
-    XSDataSampleCrystalMM,
-)
 
 strEdnaHome = os.environ.get("EDNA_HOME", None)
 
@@ -46,23 +42,19 @@ dictLocation = {
 }
 
 try:
-    from XSDataCommon import (
-        XSData,
-        XSDataDictionary,
-        XSDataFile,
-        XSDataInput,
-        XSDataInteger,
-        XSDataResult,
-        XSDataString,
-    )
-    from XSDataMXv1 import (
-        XSDataCollectionPlan,
-        XSDataDiffractionPlan,
-        XSDataExperimentalCondition,
-        XSDataInputCharacterisation,
-        XSDataResultCharacterisation,
-        XSDataSampleCrystalMM,
-    )
+    from XSDataCommon import XSData
+    from XSDataCommon import XSDataDictionary
+    from XSDataCommon import XSDataFile
+    from XSDataCommon import XSDataInput
+    from XSDataCommon import XSDataInteger
+    from XSDataCommon import XSDataResult
+    from XSDataCommon import XSDataString
+    from XSDataMXv1 import XSDataCollectionPlan
+    from XSDataMXv1 import XSDataDiffractionPlan
+    from XSDataMXv1 import XSDataExperimentalCondition
+    from XSDataMXv1 import XSDataInputCharacterisation
+    from XSDataMXv1 import XSDataResultCharacterisation
+    from XSDataMXv1 import XSDataSampleCrystalMM
 except ImportError as error:
     if strEdnaHome is not None:
         for strXsdName in dictLocation:
@@ -190,6 +182,7 @@ class MixedContainer(object):
 
 class XSDataMXCuBEDataSet(object):
     def __init__(self, imageFile=None):
+
         if imageFile is None:
             self._imageFile = []
         else:

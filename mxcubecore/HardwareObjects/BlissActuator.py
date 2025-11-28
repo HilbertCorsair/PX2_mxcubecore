@@ -2,16 +2,17 @@
 Use bliss to set different actuators in/out.
 If private_state not specified, True will be send to set in and False for out.
 Example xml file:
-<object class="BlissActuator">
+<device class="BlissActuator">
   <username>Detector Cover</username>
   <object href="/bliss" role="controller"/>
-</object>
+</device>
 """
-
 import logging
 from warnings import warn
 
-from mxcubecore.HardwareObjects.abstract.AbstractActuator import AbstractActuator
+from mxcubecore.HardwareObjects.abstract.AbstractActuator import (
+    AbstractActuator,
+)
 from mxcubecore.TaskUtils import task
 
 
@@ -50,6 +51,6 @@ class BlissActuator(AbstractActuator):
         self._actuator.set_out()
         self.value_changed(self._actuator.state())
 
-    # Compatibility with camelcase API
+    # Compatability with camelcase API
     actuatorIn = actuator_in
     actuatorOut = actuator_out

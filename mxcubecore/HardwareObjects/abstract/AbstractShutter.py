@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -17,20 +17,15 @@
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with MXCuBE. If not, see <http://www.gnu.org/licenses/>.
 
-"""AbstractShutter class - interface for shutter type devices.
-Define open/close methods and is_open property.
-Overload BaseValueEnum
+""" AbstractShutter class - interface for shutter type devices.
+Defines BaseValueEnum and ShutterStates Enums.
 """
 
 import abc
-from enum import (
-    Enum,
-    unique,
-)
-
+from enum import Enum, unique
 from mxcubecore.HardwareObjects.abstract.AbstractNState import AbstractNState
 
-__copyright__ = """ Copyright 2016-2023 by the MXCuBE collaboration """
+__copyright__ = """ Copyright 2020 by the MXCuBE collaboration """
 __license__ = "LGPLv3+"
 
 
@@ -44,48 +39,14 @@ class BaseValueEnum(Enum):
 
 
 class AbstractShutter(AbstractNState):
-    """Abstract base class for shutter type objects."""
+    """Abstract base class for N state objects."""
 
     __metaclass__ = abc.ABCMeta
     VALUES = BaseValueEnum
 
-    @property
-    def is_open(self) -> bool:
-        """Check if the shutter is open.
-        Returns:
-            (bool): True if open, False otherwise.
-        """
-        return self.get_value() == self.VALUES.OPEN
+    def __init__(self, name):
+        AbstractNState.__init__(self, name)
 
-    @property
-    def is_closed(self) -> bool:
-        """Check if the shutter is closed.
-
-        Note that it is not always true that ``is_closed != is_open``,
-        it takes time to open and close the shutter.
-
-        Many shutters can be in "moving" state.
-        When in that state the shutter is both "not open" and "not closed".
-
-        Returns:
-            ``True`` if closed, ``False`` otherwise.
-        """
-        return self.get_value() == self.VALUES.CLOSED
-
-    def open(self, timeout=None):
-        """Open the shutter.
-        Args:
-            timeout(float): optional - timeout [s],
-                            If timeout == 0: return at once and do not wait
-                            if timeout is None: wait forever.
-        """
-        self.set_value(self.VALUES.OPEN, timeout=timeout)
-
-    def close(self, timeout=None):
-        """Close the shutter.
-        Args:
-            timeout(float): optional - timeout [s],
-                            If timeout == 0: return at once and do not wait
-                            if timeout is None: wait forever.
-        """
-        self.set_value(self.VALUES.CLOSED, timeout=timeout)
+    def init(self):
+        """Initilise the predefined values"""
+        AbstractNState.init(self)

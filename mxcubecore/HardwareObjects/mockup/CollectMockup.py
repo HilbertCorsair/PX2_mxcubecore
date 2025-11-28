@@ -1,6 +1,4 @@
-# encoding: utf-8
-#
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -18,19 +16,22 @@
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with MXCuBE. If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import division, absolute_import
+from __future__ import print_function, unicode_literals
 
 import os
 import time
-
-from mxcubecore import HardwareRepository as HWR
-from mxcubecore.HardwareObjects.abstract.AbstractCollect import AbstractCollect
 from mxcubecore.TaskUtils import task
+from mxcubecore.HardwareObjects.abstract import AbstractCollect
+from mxcubecore import HardwareRepository as HWR
+
 
 __credits__ = ["MXCuBE collaboration"]
 
 
-class CollectMockup(AbstractCollect):
-    """ """
+class CollectMockup(AbstractCollect.AbstractCollect):
+    """
+    """
 
     def __init__(self, name):
         """
@@ -39,26 +40,31 @@ class CollectMockup(AbstractCollect):
         :type name: string
         """
 
-        AbstractCollect.__init__(self, name)
+        AbstractCollect.AbstractCollect.__init__(self, name)
 
         self.aborted_by_user = False
-
+        self.collection_id = -1
+        self.run_processing_parallel = False
+        
     def init(self):
-        """Main init method"""
+        """Main init method
+        """
 
-        AbstractCollect.init(self)
+        AbstractCollect.AbstractCollect.init(self)
 
         self.emit("collectConnected", (True,))
         self.emit("collectReady", (True,))
 
-    def data_collection_hook(self):
-        """Main collection hook"""
+    def _collect(self):
+        """Main collection hook
+        """
         self.emit("collectStarted", (None, 1))
         self.emit("fsmConditionChanged", "data_collection_started", True)
         self._store_image_in_lims_by_frame_num(1)
         number_of_images = self.current_dc_parameters["oscillation_sequence"][0][
             "number_of_images"
         ]
+
         for image in range(
             self.current_dc_parameters["oscillation_sequence"][0]["number_of_images"]
         ):
@@ -82,7 +88,8 @@ class CollectMockup(AbstractCollect):
         self.emit_collection_finished()
 
     def emit_collection_finished(self):
-        """Collection finished behaviour"""
+        """Collection finished beahviour
+        """
         if self.current_dc_parameters["experiment_type"] != "Collect - Multiwedge":
             self._update_data_collection_in_lims()
 
@@ -128,33 +135,34 @@ class CollectMockup(AbstractCollect):
         image_id = self._store_image_in_lims(frame)
         return image_id
 
-    def trigger_auto_processing(self, process_event, frame_number):
+    def trigger_auto_processing(self, process_event, params_dict, frame_number):
         """
         Descript. :
         """
         if HWR.beamline.offline_processing is not None:
             HWR.beamline.offline_processing.execute_autoprocessing(
                 process_event,
-                self.current_dc_parameters,
+                params_dict,
                 frame_number,
-                self.run_offline_processing,
+                self.run_processing_after,
             )
 
-    def stop_collect(self):
+    def stopCollect(self, owner="MXCuBE"):
         """
         Descript. :
         """
-        AbstractCollect.stop_collect(self)
         self.aborted_by_user = True
+        self.cmd_collect_abort()
+        self.emit_collection_failed("Aborted by user")
 
     @task
     def _take_crystal_snapshot(self, filename):
-        HWR.beamline.sample_view.save_snapshot(filename)
+        HWR.beamline.sample_view.save_scene_snapshot(filename)
 
     @task
     def _take_crystal_animation(self, animation_filename, duration_sec=1):
         """Rotates sample by 360 and composes a gif file
-        Animation is saved as the fourth snapshot
+           Animation is saved as the fourth snapshot
         """
         HWR.beamline.sample_view.save_scene_animation(animation_filename, duration_sec)
 
@@ -167,9 +175,7 @@ class CollectMockup(AbstractCollect):
 
     @task
     def move_motors(self, motor_position_dict):
-        # TODO We copy, as dictionary is reset in move_motors. CLEAR UP!!
-        # TODO clear up this confusion between move_motors and moveMotors
-        HWR.beamline.diffractometer.move_motors(motor_position_dict.copy())
+        HWR.beamline.diffractometer.move_motors(motor_position_dict)
 
     def prepare_input_files(self):
         """
@@ -202,15 +208,5 @@ class CollectMockup(AbstractCollect):
 
         return xds_directory, mosflm_directory, ""
 
-    # rhfogh Added to improve interaction with UI and persistence of values
-    def set_wavelength(self, wavelength):
-        HWR.beamline.energy.set_wavelength(wavelength)
-
-    def set_energy(self, energy):
-        HWR.beamline.energy.set_value(energy)
-
-    def set_transmission(self, transmission):
-        HWR.beamline.transmission.set_value(transmission)
-
-    def get_undulators_gaps(self):
-        return {"u29": 10}
+    def set_helical(self, value=False):
+        self.helical = value

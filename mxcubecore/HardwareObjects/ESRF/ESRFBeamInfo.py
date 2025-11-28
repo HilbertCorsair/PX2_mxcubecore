@@ -1,13 +1,14 @@
-from mxcubecore import HardwareRepository as HWR
+import logging
 from mxcubecore.HardwareObjects import BeamInfo
+from mxcubecore import HardwareRepository as HWR
 
 """
 XML example file
 <object class="ESRF.ESRFBeamInfo">
   <defaultBeamDivergence></defaultBeamDivergence>
-  <object role="camera" hwrid="/prosilica_md2"/>
-  <object role="aperture" hwrid="/udiff_aperturemot"/>
-  <object role="diffractometer" hwrid="/udiff" />
+  <device role="camera" hwrid="/prosilica_md2"/>
+  <device role="aperture" hwrid="/udiff_aperturemot"/>
+  <device role="diffractometer" hwrid="/udiff" />
   <!-- Positions and slits format: X Y -->
   <beam_position>322 243</beam_position>
   <beam_size_slits>0.04 0.04</beam_size_slits>
@@ -35,7 +36,9 @@ class ESRFBeamInfo(BeamInfo.BeamInfo):
         if beam_position:
             self.beam_position = tuple(map(float, beam_position.split()))
         else:
-            self.log.warning("ESRFBeamInfo: " + "beam position not configured")
+            logging.getLogger("HWR").warning(
+                "ESRFBeamInfo: " + "beam position not configured"
+            )
         self.difrractometer_hwobj = self.get_object_by_role("difrractometer")
         self.flux = self.get_object_by_role("flux")
         self.beam_definer = self.get_object_by_role("beam_definer")

@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -20,6 +20,8 @@
 """
 EMBLPiezoMotor
 """
+
+import logging
 
 from mxcubecore.HardwareObjects.EMBL.TINEMotor import TINEMotor
 

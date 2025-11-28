@@ -1,6 +1,6 @@
 # encoding: utf-8
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -23,11 +23,13 @@ from mxcubecore.HardwareObjects.abstract.AbstractTransmission import (
 )
 from mxcubecore.HardwareObjects.mockup.ActuatorMockup import ActuatorMockup
 
+
 __copyright__ = """ Copyright © 2019 by the MXCuBE collaboration """
 __license__ = "LGPLv3+"
 
 
 class TransmissionMockup(ActuatorMockup, AbstractTransmission):
-    """Transmission value as a percentage"""
+    """Transmission value as a percentage """
 
     # All necessary functionality is present in superclasses
+    pass

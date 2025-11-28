@@ -1,8 +1,9 @@
 import os
 import time
+import logging
 
 from mxcubecore.HardwareObjects import Session
-from mxcubecore.model import queue_model_objects
+from mxcubecore.HardwareObjects import queue_model_objects
 
 
 class ALBASession(Session.Session):
@@ -52,7 +53,9 @@ class ALBASession(Session.Session):
         # else:
         #    thedir = os.path.join(thedir, 'ARCHIVE')
 
-        self.log.debug("ALBASession. returning archive directory: %s" % archive_dir)
+        logging.getLogger("HWR").debug(
+            "ALBASession. returning archive directory: %s" % archive_dir
+        )
         return archive_dir
 
     def set_ldap_homedir(self, homedir):

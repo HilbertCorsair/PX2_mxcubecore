@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -20,8 +20,10 @@
 import logging
 import time
 
+from mxcubecore.HardwareObjects.abstract.AbstractDetector import (
+    AbstractDetector,
+)
 from mxcubecore.BaseHardwareObjects import HardwareObject
-from mxcubecore.HardwareObjects.abstract.AbstractDetector import AbstractDetector
 
 __author__ = "Vicente Rey"
 __credits__ = ["SOLEIL"]
@@ -31,9 +33,9 @@ __category__ = "General"
 
 class PX1Pilatus(AbstractDetector, HardwareObject):
     """Detector class. Contains all information about detector
-    - states are 'OK', and 'BAD'
-    - status is busy, exposing, ready, etc.
-    - physical property is RH for pilatus, P for rayonix
+       - states are 'OK', and 'BAD'
+       - status is busy, exposing, ready, etc.
+       - physical property is RH for pilatus, P for rayonix
     """
 
     def __init__(self, name):
@@ -111,7 +113,7 @@ class PX1Pilatus(AbstractDetector, HardwareObject):
                 beam_x = value[0]
                 beam_y = value[1]
         except Exception:
-            self.log.exception("")
+            pass
         return beam_x, beam_y
 
     def get_manufacturer(self):
@@ -158,15 +160,15 @@ class PX1Pilatus(AbstractDetector, HardwareObject):
         # trig_mode = "EXTERNAL_TRIGGER"
         # latency_time = 0.023
         #
-        # self.log.debug(" Preparing detector (dev=%s) for data collection" % self.devname)
+        # logging.getLogger("HWR").debug(" Preparing detector (dev=%s) for data collection" % self.devname)
         #
-        # self.log.debug("    /saving directory: %s" % basedir)
-        # self.log.debug("    /prefix          : %s" % prefix)
-        # self.log.debug("    /saving_format   : %s" % fileformat)
-        # self.log.debug("    /trigger_mode    : %s" % trig_mode)
-        # self.log.debug("    /acq_nb_frames   : %s" % nb_frames)
-        # self.log.debug("    /acq_expo_time   : %s" % exp_time)
-        # self.log.debug("    /latency_time    : %s" % latency_time)
+        # logging.getLogger("HWR").debug("    /saving directory: %s" % basedir)
+        # logging.getLogger("HWR").debug("    /prefix          : %s" % prefix)
+        # logging.getLogger("HWR").debug("    /saving_format   : %s" % fileformat)
+        # logging.getLogger("HWR").debug("    /trigger_mode    : %s" % trig_mode)
+        # logging.getLogger("HWR").debug("    /acq_nb_frames   : %s" % nb_frames)
+        # logging.getLogger("HWR").debug("    /acq_expo_time   : %s" % exp_time)
+        # logging.getLogger("HWR").debug("    /latency_time    : %s" % latency_time)
         #
         # self.device.write_attribute('saving_mode', 'AUTO_FRAME')
         # self.device.write_attribute('saving_directory', basedir)
@@ -215,6 +217,7 @@ class PX1Pilatus(AbstractDetector, HardwareObject):
         if energy_diff < (-0.08 * (2 * current_threshold / 1000.0)) or energy_diff > (
             0.05 * (2 * current_threshold / 1000.0)
         ):
+
             if self.read_state() != "STANDBY":
                 logging.getLogger("user_level_log").error(
                     "Re-calibration of Pilatus detector not possible."

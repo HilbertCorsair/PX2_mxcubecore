@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -20,14 +20,15 @@
 
 """Abstract Energy and Wavelength class.
 Defines the get/set wavelength, get_wavelength_limits methods and is_tunable
-property. Implements update_value.
+property. Implements update_value
 Emits signals valueChanged and attributeChanged.
 """
 
 import abc
-
-from mxcubecore.HardwareObjects.abstract.AbstractActuator import AbstractActuator
-from mxcubecore.utils.conversion import HC_OVER_E
+from scipy.constants import h, c, e
+from mxcubecore.HardwareObjects.abstract.AbstractActuator import (
+    AbstractActuator,
+)
 
 __copyright__ = """ Copyright © 2010-2020 by the MXCuBE collaboration """
 __license__ = "LGPLv3+"
@@ -42,7 +43,7 @@ class AbstractEnergy(AbstractActuator):
     __metaclass__ = abc.ABCMeta
 
     def __init__(self, name):
-        super().__init__(name)
+        AbstractActuator.__init__(self, name)
         self._wavelength_limits = (None, None)
 
     def is_ready(self):
@@ -52,7 +53,7 @@ class AbstractEnergy(AbstractActuator):
         """
         if self.read_only:
             return True
-        return super().is_ready()
+        return super(AbstractEnergy, self).is_ready()
 
     @property
     def is_tunable(self):
@@ -67,7 +68,7 @@ class AbstractEnergy(AbstractActuator):
         Returns:
             (float): Wavelength [Å].
         """
-        return self.calculate_wavelength()
+        return self._calculate_wavelength(self.get_value())
 
     def get_wavelength_limits(self):
         """Return wavelength low and high limits.
@@ -76,8 +77,8 @@ class AbstractEnergy(AbstractActuator):
         """
         _low, _high = self.get_limits()
         self._wavelength_limits = (
-            self.calculate_wavelength(_high),
-            self.calculate_wavelength(_low),
+            self._calculate_wavelength(_high),
+            self._calculate_wavelength(_low),
         )
         return self._wavelength_limits
 
@@ -89,34 +90,33 @@ class AbstractEnergy(AbstractActuator):
                              if timeout = 0: return at once and do not wait
                              if timeout is None: wait forever
         """
-        self.set_value(self.calculate_energy(value), timeout=timeout)
+        self.set_value(self._calculate_energy(value), timeout=timeout)
 
-    def calculate_wavelength(self, energy=None):
+    def _calculate_wavelength(self, energy=None):
         """Calculate wavelength from energy
         Args:
             energy(float): Energy [keV]
         Returns:
             (float): wavelength [Å]
         """
+        hc_over_e = h * c / e * 10e6
         energy = energy or self.get_value()
 
-        # TODO NBNB This is naughty. Could  we not put the heuristic switch
-        #  in the calling functions, to avoid surprises?
-        #  rhfogh 20210826
         # energy in KeV to get wavelength in Å
         energy = energy / 1000.0 if energy > 1000 else energy
 
-        return HC_OVER_E / energy
+        return hc_over_e / energy
 
-    def calculate_energy(self, wavelength=None):
+    def _calculate_energy(self, wavelength=None):
         """Calculate energy from wavelength
         Args:
             value((float): wavelength [Å]
         Returns:
             (float): Energy [keV]
         """
+        hc_over_e = h * c / e * 10e6
         wavelength = wavelength or self.get_wavelength()
-        return HC_OVER_E / wavelength
+        return hc_over_e / wavelength
 
     def update_value(self, value=None):
         """Emist signal energyChanged for both energy and wavelength
@@ -128,12 +128,6 @@ class AbstractEnergy(AbstractActuator):
             value = self.get_value()
         self._nominal_value = value
 
-        _wavelength_value = self.calculate_wavelength(value)
+        _wavelength_value = self._calculate_wavelength(value)
         self.emit("energyChanged", (value, _wavelength_value))
         self.emit("valueChanged", (value,))
-
-    def force_emit_signals(self):
-        super().force_emit_signals()
-        _energy_value = self.get_value()
-        _wavelength_value = self.calculate_wavelength(_energy_value)
-        self.emit("energyChanged", (_energy_value, _wavelength_value))

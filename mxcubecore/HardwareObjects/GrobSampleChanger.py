@@ -1,13 +1,11 @@
-"""Sample Changer Hardware Object"""
-
+"""Sample Changer Hardware Object
+"""
 import logging
-
+from mxcubecore.BaseHardwareObjects import Equipment
 import gevent
 
-from mxcubecore.BaseHardwareObjects import HardwareObject
 
-
-class GrobSampleChanger(HardwareObject):
+class GrobSampleChanger(Equipment):
     (FLAG_SC_IN_USE, FLAG_MINIDIFF_CAN_MOVE, FLAG_SC_CAN_LOAD, FLAG_SC_NEVER) = (
         1,
         2,
@@ -20,7 +18,7 @@ class GrobSampleChanger(HardwareObject):
     ALWAYS_ALLOW_MOUNTING = True
 
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+        Equipment.__init__(self, *args, **kwargs)
 
     def init(self):
         self._procedure = ""
@@ -48,7 +46,7 @@ class GrobSampleChanger(HardwareObject):
         self.connect(self.grob, "samples_map", self.samples_map_changed)
 
     def connect_notify(self, signal):
-        logging.info("%s: connect_notify %s", self.id, signal)
+        logging.info("%s: connect_notify %s", self.name(), signal)
         if signal == "stateChanged":
             self.sample_changer_state_changed(self.get_state())
         elif signal == "loadedSampleChanged":
@@ -98,7 +96,7 @@ class GrobSampleChanger(HardwareObject):
                 self._successCallback()
             except Exception:
                 logging.exception(
-                    "%s: exception while calling success callback", self.id
+                    "%s: exception while calling success callback", self.name()
                 )
 
     def _call_failure_callback(self):
@@ -107,7 +105,7 @@ class GrobSampleChanger(HardwareObject):
                 self._failureCallback()
             except Exception:
                 logging.exception(
-                    "%s: exception while calling failure callback", self.id
+                    "%s: exception while calling failure callback", self.name()
                 )
 
     def _sample_transfer_done(self, transfer_greenlet):
@@ -152,24 +150,23 @@ class GrobSampleChanger(HardwareObject):
             self._sample_transfer_done
         )
 
-    def load(
+    def load_sample(
         self,
-        sample=None,
+        holderLength,
         sample_id=None,
-        holderLength=None,
+        sample_location=None,
         successCallback=None,
         failureCallback=None,
         prepareCentring=None,
         prepareCentringMotors={},
         prepare_centring=None,
         prepare_centring_motors=None,
-        wait=True,
     ):
         self._successCallback = successCallback
         self._failureCallback = failureCallback
         self._holderlength = holderLength
         self._sample_id = sample_id
-        self._sample_location = sample
+        self._sample_location = sample_location
 
         if self._get_loaded_sampleNum():
             self._procedure = "UNLOAD_LOAD"

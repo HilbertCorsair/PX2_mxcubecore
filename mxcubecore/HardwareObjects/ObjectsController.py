@@ -1,7 +1,6 @@
+from mxcubecore.BaseHardwareObjects import HardwareObject
 import os
 import sys
-
-from mxcubecore.BaseHardwareObjects import HardwareObject
 
 
 class ObjectsController(HardwareObject):

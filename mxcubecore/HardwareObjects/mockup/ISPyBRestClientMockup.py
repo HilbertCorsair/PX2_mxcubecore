@@ -1,22 +1,25 @@
 """
 A client for ISPyB Webservices.
 """
-
 from __future__ import print_function
-
 import logging
 from datetime import datetime
-from urllib.parse import urljoin
-
-from mxcubecore import HardwareRepository as HWR
 from mxcubecore.BaseHardwareObjects import HardwareObject
+from mxcubecore import HardwareRepository as HWR
+
+try:
+    from urlparse import urljoin
+except Exception:
+    # Python3
+    from urllib.parse import urljoin
+
 
 _CONNECTION_ERROR_MSG = (
     "Could not connect to ISPyB, please verify that "
     + "the server is running and that your "
     + "configuration is correct"
 )
-_NO_TOKEN_MSG = "Could not connect to ISPyB, no valid REST token available."  # noqa: S105
+_NO_TOKEN_MSG = "Could not connect to ISPyB, no valid REST token available."
 
 
 class ISPyBRestClientMockup(HardwareObject):
@@ -34,7 +37,6 @@ class ISPyBRestClientMockup(HardwareObject):
         self.__rest_token = None
         self.__rest_token_timestamp = None
         self.base_result_url = None
-        self.login_ok = True
 
         self.__test_proposal = {
             "status": {"code": "ok"},
@@ -69,6 +71,7 @@ class ISPyBRestClientMockup(HardwareObject):
         }
 
     def init(self):
+
         if HWR.beamline.session:
             self.beamline_name = HWR.beamline.session.beamline_name
         else:
@@ -84,7 +87,7 @@ class ISPyBRestClientMockup(HardwareObject):
         try:
             self.base_result_url = self.get_property("base_result_url").strip()
         except AttributeError:
-            self.log.exception("")
+            pass
 
         self.__update_rest_token()
 
@@ -101,14 +104,12 @@ class ISPyBRestClientMockup(HardwareObject):
         :returns: None
 
         """
-        if password == "wrong":  # noqa: S105
-            raise Exception("Wrong credentials")
-        self.__rest_token = "#MOCKTOKEN123"  # noqa: S105
+        self.__rest_token = "#MOCKTOKEN123"
         self.__rest_token_timestamp = datetime.now()
         self.__rest_username = user
         self.__rest_password = password
         msg = "Authenticated to LIMS token is: %s" % self.__rest_root
-        logging.getLogger("ispyb_client").debug(msg)
+        logging.getLogger("ispyb_client").exception(msg)
 
     def sample_link(self):
         """
@@ -235,7 +236,7 @@ class ISPyBRestClientMockup(HardwareObject):
                            should be associated with.
         :type session_id: int
 
-        :param bl_config: The dictionary with beamline settings.
+        :param bl_config: The dictonary with beamline settings.
         :type bl_config: dict
 
         :returns beamline_setup_id: The database id of the beamline setup.
@@ -254,12 +255,13 @@ class ISPyBRestClientMockup(HardwareObject):
         :returns: None
         """
         print("update_data_collection... ", mx_collection)
+        pass
 
     def store_image(self, image_dict):
         """
         Stores the image (image parameters) <image_dict>
 
-        :param image_dict: A dictionary with image pramaters.
+        :param image_dict: A dictonary with image pramaters.
         :type image_dict: dict
 
         :returns: None
@@ -271,7 +273,7 @@ class ISPyBRestClientMockup(HardwareObject):
 
     def get_session_samples(self, proposal_id, session_id, sample_refs):
         """
-        Retrieves the list of samples associated with the session <session_id>.
+        Retrives the list of samples associated with the session <session_id>.
         The samples from ISPyB is cross checked with the ones that are
         currently in the sample changer.
 
@@ -281,7 +283,7 @@ class ISPyBRestClientMockup(HardwareObject):
         :param proposal_id: ISPyB proposal id.
         :type proposal_id: int
 
-        :param session_id: ISPyB session id to retrieve samples for.
+        :param session_id: ISPyB session id to retreive samples for.
         :type session_id: int
 
         :param sample_refs: The list of samples currently in the
@@ -317,7 +319,7 @@ class ISPyBRestClientMockup(HardwareObject):
         """
         Stores or updates a DataCollectionGroup object.
         The entry is updated of the group_id in the
-        mx_collection dictionary is set to an existing
+        mx_collection dictionary is set to an exisitng
         DataCollectionGroup id.
 
         :param mx_collection: The dictionary of values to create the object from.
@@ -327,6 +329,3 @@ class ISPyBRestClientMockup(HardwareObject):
         :rtype: int
         """
         pass
-
-    def is_connected(self):
-        return self.login_ok

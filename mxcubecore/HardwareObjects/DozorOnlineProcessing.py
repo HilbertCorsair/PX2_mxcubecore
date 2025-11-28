@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -18,18 +18,17 @@
 #  along with MXCuBE. If not, see <http://www.gnu.org/licenses/>.
 
 
-from XSDataCommon import (
-    XSDataBoolean,
-    XSDataDouble,
-    XSDataInteger,
-    XSDataString,
-)
+from XSDataCommon import XSDataBoolean
+from XSDataCommon import XSDataDouble
+from XSDataCommon import XSDataInteger
+from XSDataCommon import XSDataString
 from XSDataControlDozorv1_1 import XSDataInputControlDozor
 
-from mxcubecore import HardwareRepository as HWR
 from mxcubecore.HardwareObjects.abstract.AbstractOnlineProcessing import (
     AbstractOnlineProcessing,
 )
+from mxcubecore import HardwareRepository as HWR
+
 
 __credits__ = ["MXCuBE collaboration"]
 __license__ = "LGPLv3+"
@@ -54,9 +53,8 @@ class DozorOnlineProcessing(AbstractOnlineProcessing):
         input_file.setReversing_rotation(
             XSDataBoolean(self.params_dict["reversing_rotation"])
         )
-        pixel_size = HWR.beamline.detector.get_pixel_size()
-        input_file.setPixelMin(XSDataInteger(pixel_size[0]))
-        input_file.setPixelMax(XSDataInteger(pixel_size[1]))
+        input_file.setPixelMin(XSDataInteger(HWR.beamline.detector.get_pixel_min()))
+        input_file.setPixelMax(XSDataInteger(HWR.beamline.detector.get_pixel_max()))
         input_file.setBeamstopSize(XSDataDouble(self.beamstop_hwobj.get_size()))
         input_file.setBeamstopDistance(XSDataDouble(self.beamstop_hwobj.get_distance()))
         input_file.setBeamstopDirection(

@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -20,10 +20,10 @@
 """EMBLTransfocator"""
 
 import logging
-
 import gevent
 
 from mxcubecore.BaseHardwareObjects import HardwareObject
+
 
 __credits__ = ["EMBL Hamburg"]
 __category__ = "General"
@@ -96,7 +96,7 @@ class EMBLTransfocator(HardwareObject):
 
     def set_crl_value(self, value, timeout=None):
         """Sets CRL lens combination. If integer passed then
-        converts value to the bit list
+           converts value to the bit list
         """
         if not isinstance(value, (list, tuple)):
             value = self.convert_value(value)

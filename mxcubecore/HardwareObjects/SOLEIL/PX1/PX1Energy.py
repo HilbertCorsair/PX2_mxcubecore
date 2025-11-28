@@ -1,12 +1,17 @@
 # from qt import *
 
-import time
+from mxcubecore.BaseHardwareObjects import Device
+from mxcubecore.HardwareObjects.abstract.AbstractEnergy import AbstractEnergy
 
 from mxcubecore.Command.Tango import DeviceProxy
-from mxcubecore.HardwareObjects.abstract.AbstractEnergy import AbstractEnergy
+
+import logging
+import os
+import time
 
 
 class PX1Energy(Device, AbstractEnergy):
+
     energy_state = {
         "ALARM": "error",
         "FAULT": "error",
@@ -19,6 +24,7 @@ class PX1Energy(Device, AbstractEnergy):
     }
 
     def init(self):
+
         self.moving = False
 
         self.doBacklashCompensation = False
@@ -49,13 +55,13 @@ class PX1Energy(Device, AbstractEnergy):
 
     def connect_notify(self, signal):
         if signal == "energyChanged":
-            self.log.debug(
+            logging.getLogger("HWR").debug(
                 "PX1Energy. connect_notify. sending energy value %s" % self.get_value()
             )
             self.energyChanged(self.get_energy())
 
         if signal == "stateChanged":
-            self.log.debug(
+            logging.getLogger("HWR").debug(
                 "PX1Energy. connect_notify. sending state value %s" % self.get_state()
             )
             self.stateChanged(self.get_state())
@@ -76,6 +82,7 @@ class PX1Energy(Device, AbstractEnergy):
 
     # function called during polling
     def energyChanged(self, value):
+
         if (
             self.current_energy is not None
             and abs(self.current_energy - value) < 0.0001
@@ -178,9 +185,9 @@ class PX1Energy(Device, AbstractEnergy):
                             self.und_device.gap = newgap + backlash
                         time.sleep(1)
                 except Exception:
-                    self.log.error(
+                    logging.getLogger("HWR").error(
                         "%s: Cannot move undulator U20 : State device = %s",
-                        self.id,
+                        self.name(),
                         str(self.und_device.State()),
                     )
 
@@ -188,23 +195,23 @@ class PX1Energy(Device, AbstractEnergy):
                 self.energy_chan.set_value(value)
                 return value
             except Exception:
-                self.log.error(
+                logging.getLogger("HWR").error(
                     "%s: Cannot move Energy : State device = %s",
-                    self.id,
+                    self.name(),
                     self.get_state(),
                 )
 
         else:
-            self.log.error(
+            logging.getLogger("HWR").error(
                 "%s: Cannot move Energy : State device = %s",
-                self.id,
+                self.name(),
                 self.get_state(),
             )
 
     def set_wavelength(self, value, wait=False):
         egy_value = self.lambda_to_energy(float(value))
-        self.log.debug(
-            "%s: Moving wavelength to : %s (egy to %s" % (self.id, value, egy_value)
+        logging.getLogger("HWR").debug(
+            "%s: Moving wavelength to : %s (egy to %s" % (self.name(), value, egy_value)
         )
         self.set_valuey(egy_value)
         return value

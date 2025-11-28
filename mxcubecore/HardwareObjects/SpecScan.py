@@ -1,8 +1,6 @@
 try:
-    from SpecClient_gevent import (
-        SpecConnectionsManager,
-        SpecEventsDispatcher,
-    )
+    from SpecClient_gevent import SpecEventsDispatcher
+    from SpecClient_gevent import SpecConnectionsManager
 except ImportError:
     from SpecClient import SpecEventsDispatcher
     from SpecClient import SpecConnectionsManager
@@ -21,10 +19,8 @@ class SpecScan(Procedure):
         scanCmd.setSpecVersion(specVersion)
 
         if specVersion is not None:
-            self.specConnection = (
-                SpecConnectionsManager.SpecConnectionsManager().get_connection(
-                    specVersion
-                )
+            self.specConnection = SpecConnectionsManager.SpecConnectionsManager().get_connection(
+                specVersion
             )
 
             if self.specConnection is not None:

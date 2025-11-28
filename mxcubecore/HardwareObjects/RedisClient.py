@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -33,12 +33,14 @@ NBNB OBSOLETE there is no longer a beamline_setup
 </object>
 """
 
-import gevent
-import jsonpickle
 import redis
+import gevent
+import logging
+import jsonpickle
 
-from mxcubecore import HardwareRepository as HWR
 from mxcubecore.BaseHardwareObjects import HardwareObject
+from mxcubecore import HardwareRepository as HWR
+
 
 __version__ = "2.3."
 __category__ = "General"
@@ -73,12 +75,12 @@ class RedisClient(HardwareObject):
             self.active = False
 
         if self.active:
-            self.log.info(
+            logging.getLogger("HWR").info(
                 "RedisClient: listening to connections on %s:%d"
                 % (self.host, self.port)
             )
         else:
-            self.log.error(
+            logging.getLogger("HWR").error(
                 "RedisClient: Redis server %s:%d is not available"
                 % (self.host, self.port)
             )
@@ -86,7 +88,7 @@ class RedisClient(HardwareObject):
         try:
             self.connect(HWR.beamline.flux, "fluxChanged", self.flux_changed)
         except Exception:
-            self.log.exception("")
+            pass
 
         self.proposal_id = HWR.beamline.session.get_proposal()
         self.beamline_name = HWR.beamline.session.beamline_name
@@ -110,7 +112,7 @@ class RedisClient(HardwareObject):
             "mxcube:%s:%s:queue_current" % (self.proposal_id, self.beamline_name),
             queue_list,
         )
-        self.log.debug("RedisClient: Current queue saved")
+        logging.getLogger("HWR").debug("RedisClient: Current queue saved")
 
     def load_queue(self):
         """Loads queue from redis DB"""
@@ -121,9 +123,13 @@ class RedisClient(HardwareObject):
             selected_model = self.redis_client.get(
                 "mxcube:%s:%s:queue_model" % (self.proposal_id, self.beamline_name)
             )
+            if type(selected_model) == type(b''):
+                selected_model.decode('utf-8')
             serialized_queue = self.redis_client.get(
                 "mxcube:%s:%s:queue_current" % (self.proposal_id, self.beamline_name)
             )
+            if type(serialized_queue) == type(b''):
+                serialized_queue.decode('utf-8')
             if selected_model is not None:
                 HWR.beamline.queue_model.select_model(selected_model)
                 HWR.beamline.queue_model.load_queue_from_json_list(
@@ -132,13 +138,13 @@ class RedisClient(HardwareObject):
                 )
 
             self.active = True
-            self.log.debug("RedisClient: Queue loaded")
+            logging.getLogger("HWR").debug("RedisClient: Queue loaded")
             return selected_model
 
     def save_graphics(self):
         """Saves graphics objects in RedisDB"""
         if self.active:
-            self.log.debug(
+            logging.getLogger("HWR").debug(
                 "RedisClient: Graphics saved at "
                 + "mxcube:%s:%s:graphics" % (self.proposal_id, self.beamline_name)
             )
@@ -158,9 +164,9 @@ class RedisClient(HardwareObject):
                 HWR.beamline.sample_view.load_shapes(
                     jsonpickle.decode(graphics_objects)
                 )
-                self.log.debug("RedisClient: Graphics loaded")
+                logging.getLogger("HWR").debug("RedisClient: Graphics loaded")
             except Exception:
-                self.log.exception("")
+                pass
 
     def save_queue_history_item(self, item):
         """Saves queue history in redisDB"""
@@ -169,7 +175,7 @@ class RedisClient(HardwareObject):
                 "mxcube:%s:%s:queue_history" % (self.proposal_id, self.beamline_name),
                 str(item),
             )
-            self.log.debug("RedisClient: History queue saved")
+            logging.getLogger("HWR").debug("RedisClient: History queue saved")
 
     def load_queue_history(self):
         """Loads queue history from redisDB"""
@@ -185,7 +191,7 @@ class RedisClient(HardwareObject):
                 for item in items:
                     result.append(eval(item))
             except Exception:
-                self.log.exception("")
+                pass
         return result
 
     def clear_db(self):
@@ -205,12 +211,14 @@ class RedisClient(HardwareObject):
 
             self.active = True
         except Exception as ex:
-            self.log.debug("Redis: Exception in reading beamline setup: %s" % str(ex))
+            logging.getLogger("HWR").debug(
+                "Redis: Exception in reading beamline setup: %s" % str(ex)
+            )
 
     def save_beamline_setup_item(self, key, value):
         if self.active:
             if key == "flux":
-                self.log.debug("RedisClient: Flux value saved")
+                logging.getLogger("HWR").debug("RedisClient: Flux value saved")
                 self.redis_client.set(
                     "mxcube:%s:%s:flux" % (self.proposal_id, self.beamline_name),
                     value[0],

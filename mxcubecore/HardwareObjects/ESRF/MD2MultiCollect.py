@@ -1,17 +1,18 @@
+import gevent
+import shutil
 import logging
 import os
-import shutil
+
+from mxcubecore.TaskUtils import task
+from .ESRFMultiCollect import ESRFMultiCollect
+from mxcubecore.HardwareObjects.LimaPilatusDetector import LimaPilatusDetector
 
 from mxcubecore import HardwareRepository as HWR
-from mxcubecore.TaskUtils import task
-
-from .ESRFMultiCollect import ESRFMultiCollect
 
 
 class MD2MultiCollect(ESRFMultiCollect):
     def __init__(self, name):
         ESRFMultiCollect.__init__(self, name)
-        self.fast_characterisation = None
 
     @task
     def data_collection_hook(self, data_collect_parameters):
@@ -22,12 +23,11 @@ class MD2MultiCollect(ESRFMultiCollect):
             comment = HWR.beamline.sample_changer.get_crystal_id()
             data_collect_parameters["comment"] = comment
         except Exception:
-            self.log.exception("")
+            pass
 
     @task
     def get_beam_size(self):
-        _width, _height, _, _ = HWR.beamline.beam.get_value()
-        return _width, _height
+        return HWR.beamline.beam.beam_width, HWR.beamline.beam.beam_height
 
     @task
     def get_slit_gaps(self):
@@ -57,56 +57,54 @@ class MD2MultiCollect(ESRFMultiCollect):
         diffr.move_sync_motors(motor_positions_copy, wait=True, timeout=200)
 
     @task
-    def take_crystal_snapshots(self, number_of_snapshots, image_path_list=[]):
-        HWR.beamline.diffractometer.take_snapshot(image_path_list)
+    def take_crystal_snapshots(self, number_of_snapshots):
+        if HWR.beamline.diffractometer.in_plate_mode():
+            if number_of_snapshots > 0:
+                number_of_snapshots = 1
+        else:
+            # this has to be done before each chage of phase
+            HWR.beamline.diffractometer.save_centring_positions()
+            # not going to centring phase if in plate mode (too long)
+            HWR.beamline.diffractometer.set_phase("Centring", wait=True, timeout=200)
+
+        HWR.beamline.diffractometer.take_snapshots(number_of_snapshots, wait=True)
 
     def do_prepare_oscillation(self, *args, **kwargs):
-        diffr = HWR.beamline.diffractometer
-
         # set the detector cover out
-        try:
-            diffr.open_detector_cover()
-        except Exception:
-            self.log.exception("Could not open detector cover")
-        """
         try:
             detcover = self.get_object_by_role("controller").detcover
 
             if detcover.state == "IN":
                 detcover.set_out(10)
         except:
-            self.log.exception("Could not open detector cover")
-        """
+            logging.getLogger("HWR").exception("Could close detector cover")
+
+        diffr = HWR.beamline.diffractometer
 
         # send again the command as MD2 software only handles one
         # centered position!!
         # has to be where the motors are and before changing the phase
         # diffr.get_command_object("save_centring_positions")()
 
+        # move to DataCollection phase
+        logging.getLogger("user_level_log").info("Moving MD2 to Data Collection")
+        diffr.set_phase("DataCollection", wait=True, timeout=200)
+
         # switch on the front light
         front_light_switch = diffr.get_object_by_role("FrontLightSwitch")
         front_light_switch.set_value(front_light_switch.VALUES.IN)
         # diffr.get_object_by_role("FrontLight").set_value(2)
 
-        # move to DataCollection phase
-        logging.getLogger("user_level_log").info("Moving MD2 to DataCollection")
-        # AB next line to speed up the data collection
-        diffr.set_phase("DataCollection", wait=False, timeout=0)
-
     @task
     def data_collection_cleanup(self):
-        HWR.beamline.diffractometer._wait_ready(10)
+        self.get_object_by_role("diffractometer")._wait_ready(10)
         self.close_fast_shutter()
 
     @task
-    def oscil(self, start, end, exptime, number_of_images, wait=True):
-        diffr = HWR.beamline.diffractometer
-        # make sure the diffractometer is ready to do the scan
-        diffr.wait_ready(100)
+    def oscil(self, start, end, exptime, npass, wait=True):
+        diffr = self.get_object_by_role("diffractometer")
         if self.helical:
-            diffr.oscilScan4d(
-                start, end, exptime, number_of_images, self.helical_pos, wait=True
-            )
+            diffr.oscilScan4d(start, end, exptime, self.helical_pos, wait=True)
         elif self.mesh:
             det = HWR.beamline.detector
             latency_time = det.get_property("latecy_time_mesh") or det.get_deadtime()
@@ -114,7 +112,7 @@ class MD2MultiCollect(ESRFMultiCollect):
 
             if sequence_trigger:
                 msg = "Using LIMA sequnce trigger mode for Eiger"
-                self.log.info(msg)
+                logging.getLogger("HWR").info(msg)
                 mesh_total_nb_frames = self.mesh_num_lines
             else:
                 mesh_total_nb_frames = self.mesh_total_nb_frames
@@ -130,32 +128,13 @@ class MD2MultiCollect(ESRFMultiCollect):
                 self.mesh_range,
                 wait=True,
             )
-        elif self.fast_characterisation:
-            self.nb_frames = 10
-            self.nb_scan = 4
-            self.angle = 90
-            exptime *= 10
-            range = (end - start) * 10
-            diffr.characterisation_scan(
-                start,
-                range,
-                self.nb_frames,
-                exptime,
-                self.nb_scan,
-                self.angle,
-                wait=True,
-            )
         else:
-            diffr.oscilScan(start, end, exptime, number_of_images, wait=True)
+            diffr.oscilScan(start, end, exptime, wait=True)
 
     @task
     def prepare_acquisition(
         self, take_dark, start, osc_range, exptime, npass, number_of_images, comment=""
     ):
-        if self.fast_characterisation:
-            number_of_images *= 40
-        ext_gate = self.mesh or self.fast_characterisation
-
         self._detector.prepare_acquisition(
             take_dark,
             start,
@@ -164,8 +143,8 @@ class MD2MultiCollect(ESRFMultiCollect):
             npass,
             number_of_images,
             comment,
-            ext_gate,
-            self.mesh_num_lines,
+            self.mesh,
+            self.mesh_num_lines
         )
 
     def open_fast_shutter(self):
@@ -196,14 +175,11 @@ class MD2MultiCollect(ESRFMultiCollect):
          - nb lines
          - nb frames per line
          - invert direction (boolean)  # NOT YET DONE
-        """
+         """
         self.mesh_num_lines = num_lines
         self.mesh_total_nb_frames = total_nb_frames
         self.mesh_range = mesh_range_param
         self.mesh_center = mesh_center_param
-
-    def set_fast_characterisation(self, value=False):
-        self.fast_characterisation = value
 
     def get_cryo_temperature(self):
         return 0
@@ -213,9 +189,7 @@ class MD2MultiCollect(ESRFMultiCollect):
         return
 
     def get_beam_centre(self):
-        pixel_x, pixel_y = HWR.beamline.detector.get_pixel_size()
-        bcx, bcy = HWR.beamline.detector.get_beam_position()
-        return [bcx * pixel_x, bcy * pixel_y]
+        return HWR.beamline.detector.get_beam_position()
 
     @task
     def write_input_files(self, datacollection_id):
@@ -230,7 +204,7 @@ class MD2MultiCollect(ESRFMultiCollect):
                         continue
                     shutil.copyfile(
                         os.path.join(
-                            self.get_property("template_file_directory"), filename
+                            self.get_property(template_file_directory), filename
                         ),
                         dest,
                     )

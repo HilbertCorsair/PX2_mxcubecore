@@ -1,11 +1,14 @@
+import logging
 import time
+import gevent
 
-from mxcubecore.BaseHardwareObjects import HardwareObject
+from mxcubecore.BaseHardwareObjects import Device
+from mxcubecore.Command.Tango import DeviceProxy
 
 
-class PX1TangoLight(HardwareObject):
+class PX1TangoLight(Device):
     def __init__(self, name):
-        super().__init__(name)
+        Device.__init__(self, name)
         self.currentState = "unknown"
 
     def init(self):
@@ -85,7 +88,9 @@ class PX1TangoLight(HardwareObject):
 
     def zoom_changed(self, position_name, value):
         if self.currentState == "in":
-            self.log.debug("Zoom changed. and light is in. setting light level")
+            logging.getLogger("HWR").debug(
+                "Zoom changed. and light is in. setting light level"
+            )
             self.adjustLightLevel()
 
     def adjustLightLevel(self):
@@ -99,7 +104,9 @@ class PX1TangoLight(HardwareObject):
                 light_level = float(props["lightLevel"])
                 light_current = self.light_hwo.get_value()
                 if light_current != light_level:
-                    self.log.debug("Setting light level to %s" % light_level)
+                    logging.getLogger("HWR").debug(
+                        "Setting light level to %s" % light_level
+                    )
                     self.light_hwo.set_value(light_level)
         except Exception:
-            self.log.debug("Cannot set light level")
+            logging.getLogger("HWR").debug("Cannot set light level")

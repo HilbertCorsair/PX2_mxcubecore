@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -18,7 +18,7 @@
 #  along with MXCuBE. If not, see <http://www.gnu.org/licenses/>.
 
 import logging
-
+from mxcubecore.BaseHardwareObjects import Device
 from mxcubecore.HardwareObjects.abstract.AbstractMotor import AbstractMotor
 
 __author__ = "Jan Meyer"
@@ -29,7 +29,7 @@ __license__ = "GPL"
 
 class MotorWPositions(AbstractMotor, Device):
     """
-    <object class="MotorWPositions">
+    <device class="MotorWPositions">
         <username>Dummy</username>
         <motors>
             <object role="rolename" href="/dummy"></object>
@@ -47,12 +47,12 @@ class MotorWPositions(AbstractMotor, Device):
                 <rolename>1.23</rolename>
             </position>
         </positions>
-    </object>
+    </device>
     """
 
     def __init__(self, name):
         AbstractMotor.__init__(self, name)
-        super().__init__(name)
+        Device.__init__(self, name)
         self.predefined_positions = {}
         self.motor = None
         self.delta = 0.001
@@ -66,9 +66,7 @@ class MotorWPositions(AbstractMotor, Device):
             role = roles[0]
             self.motor = self.get_object_by_role(role)
         except KeyError:
-            self.log.error("MotorWPositions: motor not defined")
-
-            self.log.exception("")
+            logging.getLogger("HWR").error("MotorWPositions: motor not defined")
             return
         try:
             self.delta = self["deltas"].get_property(role)
@@ -99,7 +97,7 @@ class MotorWPositions(AbstractMotor, Device):
     def get_current_position_name(self, pos=None):
         if pos is None:
             pos = self.motor.get_value()
-        for position_name, position in self.predefined_positions.items():
+        for (position_name, position) in self.predefined_positions.items():
             if self.delta >= abs(pos - position):
                 return position_name
         return ""
@@ -108,7 +106,7 @@ class MotorWPositions(AbstractMotor, Device):
         try:
             self.motor.set_value(self.predefined_positions[position_name])
         except Exception:
-            self.log.exception("MotorWPositions: invalid position name")
+            logging.getLogger("HWR").exception("MotorWPositions: invalid position name")
 
     def setNewPredefinedPosition(self, positionName, positionOffset):
         raise NotImplementedError

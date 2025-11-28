@@ -7,16 +7,11 @@ The Queue manager acts as both the controller of execution and as the root/
 container of the queue, note the inheritance from QueueEntryContainer. See the
 documentation for the queue_entry module for more information.
 """
-
 import logging
-
 import gevent
-
-from mxcubecore import queue_entry
+from mxcubecore.HardwareObjects import base_queue_entry, queue_entry
 from mxcubecore.BaseHardwareObjects import HardwareObject
-from mxcubecore.model.queue_model_enumerables import CENTRING_METHOD
-from mxcubecore.queue_entry import base_queue_entry
-from mxcubecore.queue_entry.base_queue_entry import QUEUE_ENTRY_STATUS
+from mxcubecore.HardwareObjects.base_queue_entry import QUEUE_ENTRY_STATUS
 
 QueueEntryContainer = base_queue_entry.QueueEntryContainer
 
@@ -25,7 +20,6 @@ class QueueManager(HardwareObject, QueueEntryContainer):
     def __init__(self, name):
         HardwareObject.__init__(self, name)
         QueueEntryContainer.__init__(self)
-        self.centring_method = CENTRING_METHOD.NONE
         self._root_task = None
         self._paused_event = gevent.event.Event()
         self._paused_event.set()
@@ -34,13 +28,6 @@ class QueueManager(HardwareObject, QueueEntryContainer):
         self._running = False
         self._disable_collect = False
         self._is_stopped = False
-
-    def init(self):
-        site_entry_path = self.get_property("site_entry_path")
-        if site_entry_path:
-            queue_entry.import_queue_entries(site_entry_path.split(","))
-        else:
-            queue_entry.import_queue_entries()
 
     def __getstate__(self):
         d = dict(self.__dict__)
@@ -51,10 +38,6 @@ class QueueManager(HardwareObject, QueueEntryContainer):
     def __setstate__(self, d):
         self.__dict__.update(d)
         self._paused_event = gevent.event.Event()
-
-    @property
-    def current_queue_entries(self):
-        return self._current_queue_entries
 
     def enqueue(self, queue_entry):
         """
@@ -67,39 +50,17 @@ class QueueManager(HardwareObject, QueueEntryContainer):
         :returns: None
         :rtype: NoneType
         """
+        QueueEntryContainer.enqueue(self, queue_entry)
 
-        queue_entry.set_queue_controller(self)
-        super(QueueManager, self).enqueue(queue_entry)
-
-    def execute(self, entry=None):
+    def execute(self):
         """
         Starts execution of the queue.
-
-        Runs the entire queue or a single entry (entry is set) as one "run" of
-        the queue and  manages the various states such as "running", "paused"
-        and "stopped".
-
-        :param entry: Optional, queue_entry to run
-        :type entry: QueueEntry
-        :raises: RuntimeError, if the queue is already running when called
         """
-        if self._running:
-            raise RuntimeError("Can't call execute on a queue that is already running")
-
         if not self.is_disabled():
-            # If no entry is passed run all entries in the queue
-            # otherwise, run only the entry given
             self.emit("statusMessage", ("status", "Queue running", "running"))
             self._is_stopped = False
-            self._running = True
-
-            if not entry:
-                self._current_queue_entries = []
-                self._set_in_queue_flag()
-                self._root_task = gevent.spawn(self.__execute_task)
-            else:
-                task = gevent.spawn(self.__execute_entry, entry)
-                task.link((lambda _t: self._queue_end()))
+            self._set_in_queue_flag()
+            self._root_task = gevent.spawn(self.__execute_task)
 
     def _set_in_queue_flag(self):
         """
@@ -167,7 +128,7 @@ class QueueManager(HardwareObject, QueueEntryContainer):
                         qe.handle_exception(ex)
                         self.stop()
                     except gevent.GreenletExit:
-                        self.log.exception("")
+                        pass
 
                     if isinstance(ex, base_queue_entry.QueueAbortedException):
                         logging.getLogger("user_level_log").warning(
@@ -182,16 +143,20 @@ class QueueManager(HardwareObject, QueueEntryContainer):
         finally:
             self._running = False
             self.emit("queue_execution_finished", (None,))
+            # self.emit('centringAllowed', (True, ))
 
     def __execute_entry(self, entry):
         if not entry.is_enabled() or self._is_stopped:
             return
 
-        self.emit("queue_entry_execute_started", (entry,))
+        status = "Successful"
+        # self.emit('centringAllowed', (False, ))
+        self.emit("queue_entry_execute_started", (entry))
         self.set_current_entry(entry)
         self._current_queue_entries.append(entry)
 
-        logging.getLogger("queue_exec").info("Executing: " + str(entry))
+        logging.getLogger("queue_exec").info("Calling execute on: " + str(entry))
+        # logging.getLogger('queue_exec').info('Using model: ' + str(entry.get_data_model()))
 
         if self.is_paused():
             logging.getLogger("user_level_log").info("Queue paused, waiting ...")
@@ -199,8 +164,9 @@ class QueueManager(HardwareObject, QueueEntryContainer):
 
         self.wait_for_pause_event()
 
+        failed = False
         try:
-            # Procedure to be done before main implementation
+            # Procedure to be done before main implmentation
             # of task.
             entry.status = QUEUE_ENTRY_STATUS.RUNNING
             entry.pre_execute()
@@ -209,7 +175,7 @@ class QueueManager(HardwareObject, QueueEntryContainer):
             for child in entry._queue_entry_list:
                 self.__execute_entry(child)
             # This part should not be here
-            # But somehow exception from collect_failed is not caught here
+            # But somehow exception from collect_failed is not catched here
             if entry.is_failed():
                 entry.status = QUEUE_ENTRY_STATUS.FAILED
                 self.emit("queue_entry_execute_finished", (entry, "Failed"))
@@ -220,43 +186,31 @@ class QueueManager(HardwareObject, QueueEntryContainer):
                 entry.status = QUEUE_ENTRY_STATUS.SUCCESS
                 self.emit("queue_entry_execute_finished", (entry, "Successful"))
                 self.emit("statusMessage", ("status", "", "ready"))
-        except base_queue_entry.QueueSkipEntryException as ex:
-            self.log.warning(
-                "encountered Exception (continuing):\n%s" % ex.stack_trace or ex.message
-            )
-            # Queue entry, failed, skip.
+        except base_queue_entry.QueueSkippEntryException:
+            # Queue entry, failed, skipp.
             entry.status = QUEUE_ENTRY_STATUS.SKIPPED
             self.emit("queue_entry_execute_finished", (entry, "Skipped"))
-        except base_queue_entry.QueueAbortedException as ex:
+        except base_queue_entry.QueueExecutionException as ex:
+            entry.status = QUEUE_ENTRY_STATUS.FAILED
+            self.emit("queue_entry_execute_finished", (entry, "Failed"))
+            self.emit("statusMessage", ("status", "Queue execution failed", "error"))
+        except (base_queue_entry.QueueAbortedException, Exception) as ex:
             # Queue entry was aborted in a controlled, way.
             # or in the exception case:
-            # Definitely not good state, but call post_execute
-            # anyway, there might be code that cleans up things
+            # Definetly not good state, but call post_execute
+            # in anyways, there might be code that cleans up things
             # done in _pre_execute or before the exception in _execute.
-            self.log.warning(
-                "encountered Exception (continuing):\n%s" % ex.stack_trace or ex.message
-            )
             entry.status = QUEUE_ENTRY_STATUS.FAILED
             self.emit("queue_entry_execute_finished", (entry, "Aborted"))
             entry.post_execute()
             entry.handle_exception(ex)
             raise ex
-        except base_queue_entry.QueueExecutionException as ex:
-            self.log.warning(
-                "encountered Exception (continuing):\n%s" % ex.stack_trace or ex.message
-            )
-            entry.status = QUEUE_ENTRY_STATUS.FAILED
-            self.emit("queue_entry_execute_finished", (entry, "Failed"))
-            self.emit("statusMessage", ("status", "Queue execution failed", "error"))
-        except:
-            self.log.exception("")
-            raise
         else:
             entry.post_execute()
         finally:
             # self.emit('queue_entry_execute_finished', (entry, ))
             self.set_current_entry(None)
-            self._current_queue_entries.pop(self._current_queue_entries.index(entry))
+            self._current_queue_entries.remove(entry)
 
     def stop(self):
         """
@@ -268,27 +222,23 @@ class QueueManager(HardwareObject, QueueEntryContainer):
         if self._queue_entry_list:
             for qe in self._current_queue_entries:
                 try:
-                    qe.status = QUEUE_ENTRY_STATUS.FAILED
+                    qe.QUEUE_ENTRY_STATUS.FAILED
                     self.emit("queue_entry_execute_finished", (qe, "Aborted"))
                     qe.stop()
                     qe.post_execute()
                 except base_queue_entry.QueueAbortedException:
-                    self.log.exception("")
+                    pass
                 except Exception:
-                    self.log.exception("")
+                    pass
 
-        if self._root_task:
-            self._root_task.kill(block=False)
+        self._root_task.kill(block=False)
 
-        self._queue_end()
-
-    def _queue_end(self):
-        # Reset the pause event, in case we were waiting.
+        # Reset the pause event, incase we were waiting.
         self.set_pause(False)
-        self._is_stopped = True
-        self._running = False
-        self.emit("statusMessage", ("status", "", "Queue stopped"))
         self.emit("queue_stopped", (None,))
+        self.emit("statusMessage", ("status", "", "Queue stopped"))
+        # self.emit('centringAllowed', (True, ))
+        self._is_stopped = True
 
     def set_pause(self, state):
         """
@@ -407,26 +357,17 @@ class QueueManager(HardwareObject, QueueEntryContainer):
                 if result:
                     return result
 
-    def execute_entry(self, entry, use_async=False):
+    def execute_entry(self, entry):
         """
-        Executes the queue entry once the queue has been started <entry>.
+        Executes the queue entry <entry>.
 
         :param entry: The entry to execute.
         :type entry: QueueEntry
 
-        :raises: RuntimeError if the queue is not already running when called
         :returns: None
         :rtype: NoneType
         """
-        if not self._running:
-            raise RuntimeError(
-                "Queue has to be running to execute an entry with execute_entry"
-            )
-
-        if use_async:
-            gevent.spawn(self.__execute_entry, entry)
-        else:
-            self.__execute_entry(entry)
+        self.__execute_entry(entry)
 
     def clear(self):
         """

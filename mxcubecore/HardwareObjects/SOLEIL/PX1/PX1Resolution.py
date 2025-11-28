@@ -1,11 +1,18 @@
-from mxcubecore.BaseHardwareObjects import HardwareObject
+import math
+import logging
+import time
+
+from mxcubecore.Command.Tango import DeviceProxy
+
+from mxcubecore.BaseHardwareObjects import Equipment
 
 DETECTOR_DIAMETER = 424.0
 
 NOTINITIALIZED, UNUSABLE, READY, MOVESTARTED, MOVING, ONLIMIT = (0, 1, 2, 3, 4, 5)
 
 
-class PX1Resolution(HardwareObject):
+class PX1Resolution(Equipment):
+
     stateDict = {
         "UNKNOWN": 0,
         "ALARM": 1,
@@ -18,6 +25,7 @@ class PX1Resolution(HardwareObject):
     }
 
     def _init(self):
+
         self._nominal_value = None
         self.currentDistance = None
 
@@ -43,7 +51,7 @@ class PX1Resolution(HardwareObject):
         self.currentDistance = self.distance_chan.get_value()
         self._nominal_value = self.resolution_chan.get_value()
 
-        return super()._init()
+        return Equipment._init(self)
 
     def connect_notify(self, signal):
         if signal == "stateChanged":
@@ -118,6 +126,7 @@ class PX1Resolution(HardwareObject):
             self.emit("distanceChanged", (distance,))
 
     def getDistanceLimits(self):
+
         chan_info = self.distance_chan.getInfo()
 
         high = float(chan_info.max_value)
@@ -141,7 +150,9 @@ class PX1Resolution(HardwareObject):
         try:
             self.stop_command()
         except Exception:
-            self.log.err("%s: PX1Resolution.stop: error while trying to stop!", self.id)
+            logging.getLogger("HWR").err(
+                "%s: PX1Resolution.stop: error while trying to stop!", self.name()
+            )
 
     def re_emit_values(self):
         self.stateChanged()

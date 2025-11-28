@@ -1,7 +1,7 @@
 """SpecMotorWSpecPositions
 
 template:
-  <object class = "SpecMotorWSpecPositions">
+  <device class = "SpecMotorWSpecPositions">
     <username>friendly label for user</username>
     <specname>motor mnemonic in Spec</specname>
     <specversion>host:version</specversion>
@@ -9,8 +9,9 @@ template:
     <command type="spec" name="setNewPosition">macro in Spec to set new positions from an associative array</command>
     <!-- <GUIstep>default step when moving motor from the GUI</GUIstep>
          <delta>tolerance allowed between real motor position and defined position</delta> -->
-  </object>
+  </device>
 """
+import logging
 
 from mxcubecore.HardwareObjects import SpecMotor
 
@@ -69,7 +70,7 @@ class SpecMotorWSpecPositions(SpecMotor.SpecMotor):
         try:
             self.move(self.predefinedPositions[positionName])
         except Exception:
-            self.log.exception(
+            logging.getLogger("HWR").exception(
                 "Cannot move motor %s: invalid position name.", str(self.username)
             )
 
@@ -88,4 +89,4 @@ class SpecMotorWSpecPositions(SpecMotor.SpecMotor):
         try:
             self.execute_command("setNewPosition", positionName, positionOffset)
         except AttributeError:
-            self.log.exception("Cannot set new predefined position")
+            logging.getLogger("HWR").exception("Cannot set new predefined position")

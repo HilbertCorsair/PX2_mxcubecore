@@ -1,16 +1,17 @@
 # -*- coding: utf-8 -*-
 
-import logging
 import time
-
+import logging
 import gevent
 
-from mxcubecore.BaseHardwareObjects import HardwareObject
 from mxcubecore.Command.Tango import DeviceProxy
+
+from mxcubecore.BaseHardwareObjects import Device
 from mxcubecore.TaskUtils import task
 
 
 class EnvironmentPhase:
+
     TRANSFER = 0
     CENTRING = 1
     COLLECT = 2
@@ -69,13 +70,14 @@ class EnvironemntState:
         return SampleChangerState.statedesc.get(state, "Unknown")
 
 
-class PX1Environment(HardwareObject):
+class PX1Environment(Device):
     def __init__(self, name):
-        super().__init__(name)
+        Device.__init__(self, name)
         self.auth = None
         self.device = None
 
     def init(self):
+
         self.device = DeviceProxy(self.get_property("tangoname"))
 
         try:
@@ -296,7 +298,7 @@ class PX1Environment(HardwareObject):
     def setAuthorizationFlag(self, value):
         # make here the logic with eventually other permits (like hardware permit)
         if value != self.auth:
-            self.log.debug(
+            logging.getLogger("HWR").debug(
                 "PX1Environment. received authorization from cryotong:  %s" % value
             )
             self.auth = value

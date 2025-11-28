@@ -1,12 +1,12 @@
 """Tango Shutter Hardware Object
 Example XML::
 
-  <object class="ALBAEpsActuator">
+  <device class="ALBAEpsActuator">
     <username>Photon Shutter</username>
     <taurusname>bl13/ct/eps-plc-01</taurusname>
     <channel type="sardana" polling="events" name="actuator">pshu</channel>
     <states>Open,Closed</states>
-  </object>
+  </device>
 
 
 Public Interface:
@@ -42,9 +42,9 @@ Public Interface:
 
 """
 
-import logging
-
+from mxcubecore import HardwareRepository as HWR
 from mxcubecore import BaseHardwareObjects
+import logging
 
 STATE_OUT, STATE_IN, STATE_MOVING, STATE_FAULT, STATE_ALARM, STATE_UNKNOWN = (
     0,
@@ -56,7 +56,8 @@ STATE_OUT, STATE_IN, STATE_MOVING, STATE_FAULT, STATE_ALARM, STATE_UNKNOWN = (
 )
 
 
-class ALBAEpsActuator(BaseHardwareObjects.HardwareObject):
+class ALBAEpsActuator(BaseHardwareObjects.Device):
+
     states = {
         STATE_OUT: "out",
         STATE_IN: "in",
@@ -69,7 +70,7 @@ class ALBAEpsActuator(BaseHardwareObjects.HardwareObject):
     default_state_strings = ["Out", "In"]
 
     def __init__(self, name):
-        super().__init__(name)
+        BaseHardwareObjects.Device.__init__(self, name)
 
     def init(self):
         self.actuator_state = STATE_UNKNOWN
@@ -78,7 +79,9 @@ class ALBAEpsActuator(BaseHardwareObjects.HardwareObject):
             self.actuator_channel = self.get_channel_object("actuator")
             self.actuator_channel.connect_signal("update", self.stateChanged)
         except KeyError:
-            logging.getLogger().warning("%s: cannot report EPS Actuator State", self.id)
+            logging.getLogger().warning(
+                "%s: cannot report EPS Actuator State", self.name()
+            )
 
         try:
             state_string = self.get_property("states")
@@ -88,7 +91,9 @@ class ALBAEpsActuator(BaseHardwareObjects.HardwareObject):
                 states = state_string.split(",")
                 self.state_strings = states[1].strip(), states[0].strip()
         except Exception:
-            self.log.exception()
+            import traceback
+
+            logging.getLogger("HWR").warning(traceback.format_exc())
             self.state_strings = self.default_state_strings
 
     def get_state(self):
@@ -116,7 +121,8 @@ class ALBAEpsActuator(BaseHardwareObjects.HardwareObject):
         return self.username
 
     def getStatus(self):
-        """ """
+        """
+        """
         state = self.get_state()
 
         if state in [STATE_OUT, STATE_IN]:

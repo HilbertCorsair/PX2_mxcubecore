@@ -1,13 +1,5 @@
+from mxcubecore.HardwareObjects.abstract.AbstractSampleChanger import *
 import time
-
-from mxcubecore.HardwareObjects.abstract.AbstractSampleChanger import (
-    SC3,
-    Container,
-    Sample,
-    SampleChanger,
-    SampleChangerState,
-    gevent,
-)
 
 
 class Pin(Sample):
@@ -371,7 +363,7 @@ class CatsBessy(SampleChanger):
                         Pin.get_sample_address(basket_no, sample_no)
                     )
         except Exception:
-            self.log.exception("")
+            pass
         self._set_selected_component(basket)
         self._set_selected_sample(sample)
 

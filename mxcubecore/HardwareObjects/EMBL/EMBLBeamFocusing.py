@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -20,9 +20,10 @@
 import logging
 
 import gevent
-from tine import query as tinequery
 
+from tine import query as tinequery
 from mxcubecore.BaseHardwareObjects import HardwareObject
+
 
 __credits__ = ["EMBL Hamburg"]
 __license__ = "LGPLv3+"
@@ -30,7 +31,8 @@ __category__ = "General"
 
 
 class EMBLBeamFocusing(HardwareObject):
-    """Hardware Object is used to evaluate and set beam focusing mode."""
+    """Hardware Object is used to evaluate and set beam focusing mode.
+    """
 
     def __init__(self, name):
         HardwareObject.__init__(self, name)
@@ -47,7 +49,7 @@ class EMBLBeamFocusing(HardwareObject):
 
     def init(self):
         """Reads available focusing modes from the config xml and
-        attaches corresponding motors
+           attaches corresponding motors
         """
 
         self.cmd_set_calibration_name = self.get_command_object("cmdSetCalibrationName")
@@ -88,7 +90,7 @@ class EMBLBeamFocusing(HardwareObject):
                 )
                 motors_group.re_emit_values()
         else:
-            self.log.debug("BeamFocusing: No motors defined")
+            logging.getLogger("HWR").debug("BeamFocusing: No motors defined")
             self.active_focus_mode = self.focus_modes[0]["modeName"]
             self.size = self.focus_modes[0]["size"]
         self.re_emit_values()
@@ -96,12 +98,13 @@ class EMBLBeamFocusing(HardwareObject):
         try:
             self.cmd_set_phase = eval(self.get_property("setPhaseCmd"))
         except Exception:
-            self.log.exception("")
+            pass
 
         self.aperture_hwobj = self.get_object_by_role("aperture")
 
     def get_focus_motors(self):
-        """Returns a list with all focusing motors"""
+        """Returns a list with all focusing motors
+        """
 
         focus_motors = []
         if self.motors_groups is not None:
@@ -240,7 +243,7 @@ class EMBLBeamFocusing(HardwareObject):
         :type focus_mode: str
         """
         gevent.spawn(self.focus_mode_task, focus_mode)
-        self.log.info("Focusing: %s mode requested" % focus_mode)
+        logging.getLogger("HWR").info("Focusing: %s mode requested" % focus_mode)
         self.emit("focusingModeRequested", focus_mode)
 
     def focus_mode_task(self, focus_mode):

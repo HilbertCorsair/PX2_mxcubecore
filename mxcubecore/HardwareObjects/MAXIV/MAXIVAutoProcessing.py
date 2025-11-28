@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -17,33 +17,50 @@
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with MXCuBE. If not, see <http://www.gnu.org/licenses/>.
 
-import logging
+"""
+MAXIVAutoProcessing
+"""
+
 import os
 import time
-
+import logging
 import gevent
+import subprocess
+
 from XSDataAutoprocv1_0 import XSDataAutoprocInput
-from XSDataCommon import (
-    XSDataDouble,
-    XSDataFile,
-    XSDataInteger,
-    XSDataString,
-)
+
+from XSDataCommon import XSDataDouble
+from XSDataCommon import XSDataFile
+from XSDataCommon import XSDataInteger
+from XSDataCommon import XSDataString
 
 from mxcubecore.BaseHardwareObjects import HardwareObject
 
 
 class MAXIVAutoProcessing(HardwareObject):
+    """
+    Descript. :
+    """
+
     def __init__(self, name):
+        """
+        Descript. :
+        """
         HardwareObject.__init__(self, name)
         self.result = None
         self.autoproc_programs = None
         self.current_autoproc_procedure = None
 
     def init(self):
+        """
+        Descript. :
+        """
         self.autoproc_programs = self["programs"]
 
     def execute_autoprocessing(self, process_event, params_dict, frame_number):
+        """
+        Descript. :
+        """
         if self.autoproc_programs is not None:
             self.current_autoproc_procedure = gevent.spawn(
                 self.autoproc_procedure, process_event, params_dict, frame_number
@@ -51,12 +68,12 @@ class MAXIVAutoProcessing(HardwareObject):
             self.current_autoproc_procedure.link(self.autoproc_done)
 
     def autoproc_procedure(self, process_event, params_dict, frame_number):
-        """Main autoprocessing procedure.
+        """
+        Descript. :
 
-        At the beginning correct event (defined in xml) is found. If the event
-        is executable then accordingly to the event type (image, after) then
-        the sequence is executed:
-
+        Main autoprocessing procedure. At the beginning correct event (defined
+        in xml) is found. If the event is executable then accordingly to the
+        event type (image, after) then the sequence is executed:
         Implemented tasks:
            - after : Main autoprocessing procedure
                      1. Input file is generated with create_autoproc_input
@@ -132,20 +149,28 @@ class MAXIVAutoProcessing(HardwareObject):
                         )
                         will_execute = True
                 if will_execute:
-                    self.log.info("[MAXIVAutoprocessing] Executing module: %s" % module)
+                    logging.getLogger("HWR").info(
+                        "[MAXIVAutoprocessing] Executing module: %s" % module
+                    )
                     try:
                         mod.parse_and_execute()
                     except Exception as ex:
-                        self.log.error(
+                        logging.getLogger("HWR").error(
                             "[MAXIVAutoprocessing] Module %s  execution error." % module
                         )
                         print(module, ex)
 
     def autoproc_done(self, current_autoproc):
+        """
+        Descript. :
+        """
         self.current_autoproc_procedure = None
-        self.log.info("Autoprocessing executed.")
+        logging.getLogger("HWR").info("Autoprocessing executed.")
 
     def create_autoproc_input(self, event, params):
+        """
+        Descript. :
+        """
         WAIT_XDS_TIMEOUT = 20
         WAIT_XDS_RESOLUTION = 1
 

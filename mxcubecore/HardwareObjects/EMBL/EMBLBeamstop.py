@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -17,7 +17,9 @@
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with MXCuBE. If not, see <http://www.gnu.org/licenses/>.
 
+from mxcubecore.BaseHardwareObjects import Device
 from mxcubecore.HardwareObjects.abstract.AbstractMotor import AbstractMotor
+
 
 __credits__ = ["EMBL Hamburg"]
 __version__ = "2.3."
@@ -26,7 +28,7 @@ __category__ = "General"
 
 class EMBLBeamstop(Device, AbstractMotor):
     def __init__(self, name):
-        super().__init__(name)
+        Device.__init__(self, name)
 
         self.distance = None
         self.default_size = None
@@ -37,7 +39,7 @@ class EMBLBeamstop(Device, AbstractMotor):
         self.chan_position = None
 
     def init(self):
-        """Reads parameters from xml and adds necessary channels"""
+        """Reads parameters from xml and adds neccessary channels"""
         self.default_size = self.get_property("defaultBeamstopSize")
         self.default_distance = self.get_property("defaultBeamstopDistance")
         self.default_direction = self.get_property("defaultBeamstopDirection")
@@ -53,7 +55,8 @@ class EMBLBeamstop(Device, AbstractMotor):
         self.chan_position = self.get_channel_object("BeamstopPosition")
 
     def is_ready(self):
-        """Returns True if device ready"""
+        """Returns True if device ready
+        """
         return True
 
     def distance_changed(self, value):

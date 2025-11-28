@@ -5,7 +5,7 @@
 BeamInfo hardware object is used to define final beam size and shape.
 It can include aperture, slits and/or other beam definer (lenses or other eq.)
 
-[Emitted signals]
+[Emited signals]
 beamInfoChanged
 beamPosChanged
 
@@ -19,10 +19,11 @@ beamPosChanged
 -----------------------------------------------------------------------
 """
 
-from mxcubecore.BaseHardwareObjects import HardwareObject
+import logging
+from mxcubecore.BaseHardwareObjects import Equipment
 
 
-class ALBABeamInfo(HardwareObject):
+class ALBABeamInfo(Equipment):
     """
     Description:
     """
@@ -31,7 +32,7 @@ class ALBABeamInfo(HardwareObject):
         """
         Descrip. :
         """
-        super().__init__(*args)
+        Equipment.__init__(self, *args)
 
         self.aperture_hwobj = None
         self.slits_hwobj = None
@@ -76,7 +77,7 @@ class ALBABeamInfo(HardwareObject):
                 self.get_property("beam_divergence_horizontal")
             )
         except Exception:
-            self.log.exception("")
+            pass
 
         self.default_beam_divergence = [
             default_beam_divergence_horizontal,
@@ -180,7 +181,7 @@ class ALBABeamInfo(HardwareObject):
         Arguments :
         Return    :
         """
-        self.log.debug(" emitting beam info")
+        logging.getLogger("HWR").debug(" emitting beam info")
         if (
             self.beam_info_dict["size_x"] != 9999
             and self.beam_info_dict["size_y"] != 9999

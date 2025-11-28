@@ -1,7 +1,8 @@
+from mxcubecore.BaseHardwareObjects import HardwareObject
+import os
+import sys
 import gevent
 import numpy
-
-from mxcubecore.BaseHardwareObjects import HardwareObject
 
 
 def plot_emitter(new_plot, plot_data, plot_end):
@@ -37,11 +38,11 @@ class PlottingMockup(HardwareObject):
         self.__plotter = gevent.spawn(
             plot_emitter, self.__on_scan_new, self.__on_scan_data, self.__on_scan_end
         )
-        self.__scan_data = {}
+        self.__scan_data = dict()
 
     def __on_scan_new(self, scan_info):
         scan_id = scan_info["scan_nb"]
-        self.__scan_data[scan_id] = []
+        self.__scan_data[scan_id] = list()
 
         self.emit(
             "new_plot",

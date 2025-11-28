@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -16,14 +16,12 @@
 #
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with MXCuBE. If not, see <http://www.gnu.org/licenses/>.
-import json
-from enum import (
-    Enum,
-    unique,
-)
-
-import gevent
 import redis
+import json
+import gevent
+import logging
+
+from enum import Enum, unique
 
 from mxcubecore.BaseHardwareObjects import HardwareObject
 
@@ -48,7 +46,7 @@ class PlotDim(Enum):
 
 class DataType(Enum):
     """
-    Defines available data types
+    Defines avialable data types
     """
 
     FLOAT = "float"
@@ -99,7 +97,7 @@ class DataPublisher(HardwareObject):
         rdb = self.get_property("db", 11)
 
         self._r = redis.Redis(
-            host=rhost, port=rport, db=rdb, encoding="utf-8", decode_responses=True
+            host=rhost, port=rport, db=rdb, charset="utf-8", decode_responses=True
         )
 
         if not self._subsribe_task:
@@ -154,8 +152,7 @@ class DataPublisher(HardwareObject):
                         }
 
                         self.emit(
-                            "data",
-                            {"id": _id, "data": data["data"]},
+                            "data", {"id": _id, "data": data["data"]},
                         )
 
                         self._append_data(
@@ -163,14 +160,14 @@ class DataPublisher(HardwareObject):
                         )
                     else:
                         msg = "Unknown frame type %s" % message
-                        self.log.error(msg)
+                        logging.getLogger("HWR").error(msg)
                 except Exception:
                     msg = "Could not parse data in %s" % message
-                    self.log.exception(msg)
+                    logging.getLogger("HWR").exception(msg)
 
     def _remove_available(self, _id):
         """
-        Remove source with _id from list of available sources
+        Remove source with _id from list of avialable sources
 
         Args:
             _id (str): The id of the source to remove
@@ -183,7 +180,7 @@ class DataPublisher(HardwareObject):
 
     def _add_avilable(self, _id):
         """
-        Add source with _id to list of available sources
+        Add source with _id to list of avialable sources
 
         Args:
             _id (str): The id of the sources to remove
@@ -306,6 +303,7 @@ class DataPublisher(HardwareObject):
         _range=(None, None),
         meta={},
     ):
+
         plot_description = {
             "id": _id,
             "name": name,
@@ -369,9 +367,7 @@ class DataPublisher(HardwareObject):
 
         if desc["data_dim"] > 1:
             data.update(
-                {
-                    "z": self._r.lrange("HWR_DP_%s_DATA_Z" % _id, 0, -1),
-                }
+                {"z": self._r.lrange("HWR_DP_%s_DATA_Z" % _id, 0, -1),}
             )
 
         return data

@@ -1,23 +1,21 @@
+#!/usr/bin/env python
+
 #
 # Generated Fri Feb 20 04:42::27 2015 by EDGenerateDS.
 #
 
+from XSDataCommon import XSDataString
+from XSDataCommon import XSDataResult
+from XSDataCommon import XSDataInteger
+from XSDataCommon import XSDataInput
+from XSDataCommon import XSDataFile
+from XSDataCommon import XSDataDouble
+from XSDataCommon import XSDataBoolean
 import os
 import sys
-from xml.dom import (
-    Node,
-    minidom,
-)
+from xml.dom import minidom
+from xml.dom import Node
 
-from XSDataCommon import (
-    XSDataBoolean,
-    XSDataDouble,
-    XSDataFile,
-    XSDataInput,
-    XSDataInteger,
-    XSDataResult,
-    XSDataString,
-)
 
 strEdnaHome = os.environ.get("EDNA_HOME", None)
 
@@ -32,15 +30,13 @@ dictLocation = {
 }
 
 try:
-    from XSDataCommon import (
-        XSDataBoolean,
-        XSDataDouble,
-        XSDataFile,
-        XSDataInput,
-        XSDataInteger,
-        XSDataResult,
-        XSDataString,
-    )
+    from XSDataCommon import XSDataBoolean
+    from XSDataCommon import XSDataDouble
+    from XSDataCommon import XSDataFile
+    from XSDataCommon import XSDataInput
+    from XSDataCommon import XSDataInteger
+    from XSDataCommon import XSDataResult
+    from XSDataCommon import XSDataString
 except ImportError as error:
     if strEdnaHome is not None:
         for strXsdName in dictLocation:

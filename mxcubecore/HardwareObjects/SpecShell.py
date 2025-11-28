@@ -6,17 +6,15 @@ template:
   </procedure>
 """
 
-from mxcubecore.BaseHardwareObjects import HardwareObject
+import logging
+from mxcubecore.BaseHardwareObjects import Equipment
 
 try:
     import SpecClient_gevent as SpecClient
 except ImportError:
     import SpecClient
 
-from qt import (
-    PYSIGNAL,
-    QObject,
-)
+from qt import *
 
 
 class SpecOutputVar(QObject, SpecClient.SpecVariable.SpecVariableA):
@@ -30,9 +28,9 @@ class SpecOutputVar(QObject, SpecClient.SpecVariable.SpecVariableA):
             self.emit(PYSIGNAL("outputReceived"), (value,))
 
 
-class SpecShell(HardwareObject):
+class SpecShell(Equipment):
     def __init__(self, *args):
-        super().__init__(*args)
+        Equipment.__init__(self, *args)
         self.isSpecReady = False
 
     def init(self):
@@ -52,7 +50,7 @@ class SpecShell(HardwareObject):
             )
         except AttributeError:
             self.specConnection = None
-            self.log.error("SpecShell: you must specify a spec version")
+            logging.getLogger("HWR").error("SpecShell: you must specify a spec version")
         else:
             self.specOutput.connectToSpec(
                 "output/tty",
@@ -153,7 +151,7 @@ class SpecShell(HardwareObject):
                 try:
                     buf_list = buf.split()
                 except Exception:
-                    self.log.exception("")
+                    pass
                 else:
                     i = 0
                     while i < len(buf_list):
@@ -161,20 +159,20 @@ class SpecShell(HardwareObject):
                         try:
                             cmd_aux = buf_list[i + 1]
                         except Exception:
-                            self.log.exception("")
+                            pass
                         else:
                             try:
                                 left_par = cmd_aux[0]
                                 right_par = cmd_aux[-1]
                                 midle_num = cmd_aux[1:-1]
                             except Exception:
-                                self.log.exception("")
+                                pass
                             else:
                                 if left_par == "(" and right_par == ")":
                                     try:
                                         int(midle_num)
                                     except Exception:
-                                        self.log.exception("")
+                                        pass
                                     else:
                                         commands_list.append(cmd_name.lstrip("*"))
                         i += 2
@@ -220,7 +218,7 @@ class SpecShell(HardwareObject):
             try:
                 self.specShellCommand.abort()
             except SpecClient.SpecClientError.SpecClientError as diag:
-                self.log.exception("")
+                pass
 
     def outputReceived(self, output):
         if self.lsdefRunning:
@@ -248,7 +246,7 @@ class SpecShell(HardwareObject):
                 else:
                     cmds.append(cmd.method)
         except Exception:
-            self.log.exception("")
+            pass
         return cmds
 
     def getAllCommands(self):

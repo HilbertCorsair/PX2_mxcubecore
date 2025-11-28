@@ -6,6 +6,7 @@ template:
   </procedure>
 """
 
+import logging
 from mxcubecore.BaseHardwareObjects import Procedure
 
 try:
@@ -26,7 +27,7 @@ class SpecState(Procedure):
             )
         except AttributeError:
             self.specConnection = None
-            self.log.error("SpecState: you must specify a spec version")
+            logging.getLogger("HWR").error("SpecState: you must specify a spec version")
         else:
             SpecClient.SpecEventsDispatcher.connect(
                 self.specConnection, "connected", self.specConnected
@@ -61,7 +62,7 @@ class SpecState(Procedure):
         try:
             cmd = self.get_command_object("SpecStateMacro")
         except KeyError:
-            self.log.exception("")
+            pass
         else:
             if cmd is not None:
                 cmd.disconnect_signal("commandReady", self.commandReady)
@@ -95,15 +96,15 @@ class SpecState(Procedure):
 
     def emitSpecState(self, entering):
         if entering == self.lastState:
-            # self.log.debug('SpecState: %s already in %s' % (wwself.specversion,entering))
+            # logging.getLogger("HWR").debug('SpecState: %s already in %s' % (wwself.specversion,entering))
             return
 
         if self.lastState != "Unknown" and self.lastState != entering:
-            # self.log.debug('SpecState: %s from %s to %s ' % (self.specversion,self.lastState,entering))
+            # logging.getLogger("HWR").debug('SpecState: %s from %s to %s ' % (self.specversion,self.lastState,entering))
             signal_name = "specState%s" % self.lastState
             self.emit(signal_name, (False, self.specversion))
         # else:
-        #    self.log.debug('SpecState: %s entering %s' % (self.specversion,entering))
+        #    logging.getLogger("HWR").debug('SpecState: %s entering %s' % (self.specversion,entering))
 
         self.lastState = entering
         signal_name = "specState%s" % entering

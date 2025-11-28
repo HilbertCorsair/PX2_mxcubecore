@@ -1,4 +1,4 @@
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube.
 #
 #  This file is part of MXCuBE software.
@@ -37,14 +37,9 @@ Example xml file:
 """
 
 import logging
-
-from gevent import (
-    sleep,
-    spawn,
-)
-from PyTango import DevFailed
+from gevent import sleep, spawn
 from PyTango.gevent import DeviceProxy
-
+from PyTango import DevFailed
 from mxcubecore.HardwareObjects.abstract.AbstractNState import AbstractNState
 
 __copyright__ = """ Copyright © 2010-2020 by the MXCuBE collaboration """
@@ -55,7 +50,7 @@ class BlissHutchTrigger(AbstractNState):
     """Read the state of the hutch from the PSS and take actions."""
 
     def __init__(self, name):
-        super().__init__(name)
+        super(BlissHutchTrigger, self).__init__(name)
         self._bliss_obj = None
         self._proxy = None
         self.card = None
@@ -67,21 +62,21 @@ class BlissHutchTrigger(AbstractNState):
 
     def init(self):
         """Initialise properties and polling"""
-        super().init()
+        super(BlissHutchTrigger, self).init()
         self._bliss_obj = self.get_object_by_role("controller")
         tango_device = self.get_property("pss_tango_device")
         try:
             self._proxy = DeviceProxy(tango_device)
         except DevFailed as _traceback:
             last_error = _traceback[-1]
-            msg = f"{self.id}: {last_error['desc']}"
+            msg = f"{self.name()}: {last_error['desc']}"
             raise RuntimeError(msg)
 
         pss = self.get_property("pss_card_ch")
         try:
             self.card, self.channel = map(int, pss.split("/"))
         except AttributeError:
-            msg = f"{self.id}: cannot find PSS number"
+            msg = f"{self.name()}: cannot find PSS number"
             raise RuntimeError(msg)
 
         # polling interval [s]

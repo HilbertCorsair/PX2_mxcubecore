@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -19,9 +19,10 @@
 
 """EMBLTableMotor"""
 
-import atexit
-import socket
 import time
+import socket
+import atexit
+import logging
 
 from mxcubecore.HardwareObjects.abstract.AbstractMotor import AbstractMotor
 
@@ -111,6 +112,6 @@ class EMBLTableMotor(AbstractMotor):
         """
         try:
             self.socket.close()
-            self.log.info("EMBLTableMotor: Socket closed")
+            logging.getLogger("HWR").info("EMBLTableMotor: Socket closed")
         except Exception:
-            self.log.error("EMBLTableMotor: Failed to close the socket")
+            logging.getLogger("HWR").error("EMBLTableMotor: Failed to close the socket")

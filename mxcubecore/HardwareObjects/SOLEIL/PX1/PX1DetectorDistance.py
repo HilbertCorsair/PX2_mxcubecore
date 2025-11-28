@@ -1,11 +1,12 @@
 import time
-
 import gevent
 
+from mxcubecore.BaseHardwareObjects import Device
 from mxcubecore.HardwareObjects.abstract.AbstractMotor import AbstractMotor
 
 
 class PX1DetectorDistance(Device, AbstractMotor):
+
     MOVESTARTED = 0
     NOTINITIALIZED = 0
     UNUSABLE = 0
@@ -127,10 +128,10 @@ class PX1DetectorDistance(Device, AbstractMotor):
         self.position_chan.set_value(value)
 
     def get_motor_mnemonic(self):
-        return self.name
+        return self.name()
 
     def check_light(self, position):
-        # light is not controlled anymore. it is left in place but the
+        # ligth is not controlled anymore. it is left in place but the
         # px1environment sets the distanceMin value used here as a lower limit
         # to avoid collision
 

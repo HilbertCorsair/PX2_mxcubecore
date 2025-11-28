@@ -1,14 +1,9 @@
-"""ESRF SC3 Sample Changer Hardware Object"""
-
+"""ESRF SC3 Sample Changer Hardware Object
+"""
 import functools
-
+import logging
+from mxcubecore.TaskUtils import task, cleanup, error_cleanup
 import SC3
-
-from mxcubecore.TaskUtils import (
-    cleanup,
-    error_cleanup,
-    task,
-)
 
 
 class ESRFSC3(SC3.SC3):
@@ -39,7 +34,7 @@ class ESRFSC3(SC3.SC3):
         try:
             self.operationalFlagsChanged(chan)
         except Exception:
-            self.log.exception(
+            logging.getLogger("HWR").exception(
                 "%s: error getting SC vs MD operational flags" % self.name()
             )
 
@@ -52,7 +47,7 @@ class ESRFSC3(SC3.SC3):
 
     def __getSample(self, sample_id, sample_location):
         if sample_id and sample_location:
-            self.log.debug(
+            logging.getLogger("HWR").debug(
                 "%s: both sample barcode and location provided, discarding barcode...",
                 self.name(),
             )
@@ -102,10 +97,10 @@ class ESRFSC3(SC3.SC3):
                     )
 
                 if loaded:
-                    self.log.debug("%s: sample is loaded", self.name())
+                    logging.getLogger("HWR").debug("%s: sample is loaded", self.name())
 
                     if self.prepareCentringAfterLoad and prepareCentring:
-                        self.log.debug(
+                        logging.getLogger("HWR").debug(
                             "%s: preparing minidiff for sample centring", self.name()
                         )
                         self.emit("stateChanged", SC3.SampleChangerState.Moving)
@@ -124,7 +119,7 @@ class ESRFSC3(SC3.SC3):
         pass
 
     def __load_sample(self, holderLength, sample_id, sample_location):
-        self.log.debug("%s: in load_sample", self.name())
+        logging.getLogger("HWR").debug("%s: in load_sample", self.name())
 
         sample = self.__getSample(sample_id, sample_location)
 
@@ -133,7 +128,7 @@ class ESRFSC3(SC3.SC3):
 
         if not holderLength:
             holderLength = 22
-            self.log.debug(
+            logging.getLogger("HWR").debug(
                 "%s: loading sample: using default holder length (%d mm)",
                 self.name(),
                 holderLength,
@@ -184,7 +179,9 @@ class ESRFSC3(SC3.SC3):
                     )
 
                 if unloaded:
-                    self.log.debug("%s: sample has been unloaded", self.name())
+                    logging.getLogger("HWR").debug(
+                        "%s: sample has been unloaded", self.name()
+                    )
 
                     self.emit("statusChanged", "Ready")
 
@@ -196,7 +193,7 @@ class ESRFSC3(SC3.SC3):
 
         if not holderLength:
             holderLength = 22
-            self.log.debug(
+            logging.getLogger("HWR").debug(
                 "%s: unloading sample: using default holder length (%d mm)",
                 self.name(),
                 holderLength,
@@ -233,7 +230,9 @@ class ESRFSC3(SC3.SC3):
         try:
             val = int(val)
         except Exception:
-            self.log.exception("%s: error reading operational flags" % self.name())
+            logging.getLogger("HWR").exception(
+                "%s: error reading operational flags" % self.name()
+            )
             return
 
         old_sc_can_load = self.lastOperationalFlags & ESRFSC3.FLAG_SC_CAN_LOAD
@@ -269,7 +268,9 @@ class ESRFSC3(SC3.SC3):
         try:
             self.unlockMinidiffMotors()
         except Exception:
-            self.log.exception("%s: error unlocking minidiff motors" % self.name())
+            logging.getLogger("HWR").exception(
+                "%s: error unlocking minidiff motors" % self.name()
+            )
             return False
         return True
 
@@ -278,7 +279,7 @@ class ESRFSC3(SC3.SC3):
         try:
             r=self._moveToLoadingPosition()
         except:
-            self.log.exception("%s: error moving sample changer to loading position" % self.name())
+            logging.getLogger("HWR").exception("%s: error moving sample changer to loading position" % self.name())
             return False
         return True
     """

@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -26,48 +26,46 @@ This module declares class GenericVideo.
 
 This class is not meant to be instanced directly but as
 the base class for classes providing access to Video in MXCuBE
+
+
 """
 
+from __future__ import print_function
 import abc
-import logging
 import os
 import sys
 import time
-import warnings
-from io import BytesIO
-
+import logging
 import gevent
 import numpy as np
 
 try:
     import cv2
-except ImportError:
-    logging.getLogger("HWR").exception("")
+except Exception:
+    pass
 
-from mxcubecore.BaseHardwareObjects import HardwareObject
+from mxcubecore.BaseHardwareObjects import Device
+
 
 module_names = ["qt", "PyQt5", "PyQt4"]
 
 if any(mod in sys.modules for mod in module_names):
     USEQT = True
-    from mxcubecore.utils.qt_import import (
-        QImage,
-        QPixmap,
-        QSize,
-    )
+    from mxcubecore.utils.qt_import import QPixmap, QImage
 else:
     USEQT = False
     from PIL import Image
 
 
-class AbstractVideoDevice(HardwareObject):
+class AbstractVideoDevice(Device):
+
     default_cam_encoding = "yuv422p"
     default_poll_interval = 50
     default_cam_type = "basler"
     default_scale_factor = 1.0
 
     def __init__(self, name):
-        super().__init__(name)
+        Device.__init__(self, name)
 
         self.cam_mirror = None
         self.cam_encoding = None
@@ -86,57 +84,70 @@ class AbstractVideoDevice(HardwareObject):
         self.default_poll_interval = None
 
         self.decoder = None
-        self.scale = None
 
     def init(self):
-        """Initialise the values from config and set default values,
-        when appropriate
-        """
         self.cam_name = self.get_property("name", "camera")
 
         try:
             self.cam_mirror = eval(self.get_property("mirror"))
-        except TypeError:
+        except Exception:
             self.cam_mirror = [False, False]
 
         try:
             self.cam_encoding = self.get_property("encoding").lower()
-        except AttributeError:
-            # apply default value
-            self.cam_encoding = AbstractVideoDevice.default_cam_encoding
+        except Exception:
+            pass
 
         scale = self.get_property("scale")
-        try:
-            self.cam_scale_factor = eval(scale)
-        except TypeError:
-            logging.getLogger().warning(
-                "%s: failed to interpret scale factor for camera.\nUsing default.",
-                self.id,
-            )
+        if scale is None:
             self.cam_scale_factor = self.default_scale_factor
+        else:
+            try:
+                self.cam_scale_factor = eval(scale)
+            except Exception:
+                logging.getLogger().warning(
+                    "%s: failed to interpret scale factor for camera." "Using default.",
+                    self.name(),
+                )
+                self.cam_scale_factor = self.default_scale_factor
 
-        self.poll_interval = self.get_property("interval", self.default_poll_interval)
+        try:
+            self.poll_interval = self.get_property("interval")
+        except Exception:
+            self.poll_interval = 1
 
         try:
             self.cam_gain = float(self.get_property("gain"))
-        except TypeError:
-            self.log.exception("")
+        except Exception:
+            pass
 
         try:
             self.cam_exposure = float(self.get_property("exposure"))
-        except TypeError:
-            # apply default value
-            self.cam_exposure = self.poll_interval / 1000.0
+        except Exception:
+            pass
 
         self.scale = self.get_property("scale", 1.0)
 
         try:
             self.cam_type = self.get_property("type").lower()
-        except AttributeError:
-            # apply default value
+        except Exception:
+            pass
+
+        # Apply defaults if necessary
+        if self.cam_encoding is None:
+            self.cam_encoding = AbstractVideoDevice.default_cam_encoding
+
+        if self.poll_interval is None:
+            self.poll_interval = self.default_poll_interval
+
+        if self.cam_exposure is None:
+            self.cam_exposure = self.poll_interval / 1000.0
+
+        if self.cam_type is None:
             self.cam_type = self.default_cam_type
 
         # Apply values
+
         self.set_video_live(False)
         time.sleep(0.1)
         self.set_cam_encoding(self.cam_encoding)
@@ -152,27 +163,25 @@ class AbstractVideoDevice(HardwareObject):
             self.set_video_live(True)
             self.change_owner()
 
-            self.log.info("Starting polling for camera")
+            logging.getLogger("HWR").info("Starting polling for camera")
             self.image_polling = gevent.spawn(
                 self.do_image_polling, self.poll_interval / 1000.0
             )
             self.image_polling.link_exception(self.polling_ended_exc)
             self.image_polling.link(self.polling_ended)
 
+        self.set_is_ready(True)
+
     def get_camera_name(self):
-        """Get the camera name.
-        Returns:
-            (str): The name
-        """
         return self.cam_name
 
     def polling_ended(self, gl=None):
-        self.log.info("Polling ended for qt camera")
+        logging.getLogger("HWR").info("Polling ended for qt camera")
 
     def polling_ended_exc(self, gl=None):
-        self.log.info("Polling ended exception for qt camera")
+        logging.getLogger("HWR").info("Polling ended exception for qt camera")
 
-    # -------- Generic methods --------
+    """ Generic methods """
 
     def get_new_image(self):
         """
@@ -186,6 +195,7 @@ class AbstractVideoDevice(HardwareObject):
                 qimage = QImage(
                     raw_buffer, width, height, width * 3, QImage.Format_RGB888
                 )
+
             else:
                 qimage = QImage(raw_buffer, width, height, QImage.Format_RGB888)
 
@@ -201,76 +211,47 @@ class AbstractVideoDevice(HardwareObject):
             return qimage.copy()
 
     def get_jpg_image(self):
-        """Reads`raw_data` image `[1D numpy array of np.uint16]` from
-        `self.get_image()` and convert it to .jpg image.
-        For now this function allows to deal with any RGB encoded
-        video data. Emit imageReceived signal with the jpeg image.
-
-        Returns:
-            (bytes): Converted to jpeg image.
+        """ for now this function allows to deal with prosilica or any RGB encoded video data"""
+        """
+           the signal imageReceived is as expected by mxcube3
         """
         raw_buffer, width, height = self.get_image()
 
         if raw_buffer is not None and raw_buffer.any():
             image = Image.frombytes("RGB", (width, height), raw_buffer)
-            buffer = BytesIO()
-            image.save(buffer, "JPEG")
-            jpg_img = buffer.getvalue()
-            if jpg_img is not None:
-                self.emit("imageReceived", jpg_img, width, height)
-            return jpg_img
-        return None
+            from cStringIO import StringIO
+
+            strbuf = StringIO()
+            image.save(strbuf, "JPEG")
+            jpgimg_str = strbuf.getvalue()
+            if jpgimg_str is not None:
+                self.emit("imageReceived", jpgimg_str, width, height)
+            return jpgimg_str
+        else:
+            return None
 
     def get_cam_type(self):
-        """Get the camera type
-        Returns:
-            (): Camera type.
-        """
         return self.cam_type
 
     def y8_2_rgb(self, raw_buffer):
-        """Convert Y8 to RGB.
-        Args:
-            raw_buffer: Image
-        Returns:
-            (): Converted image.
-        """
         image = np.fromstring(raw_buffer, dtype=np.uint8)
         raw_dims = self.get_raw_image_size()
         image.resize(raw_dims[1], raw_dims[0], 1)
         return cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
 
     def y16_2_rgb(self, raw_buffer):
-        """Convert Y16 to RGB.
-        Args:
-            raw_buffer: Image
-        Returns:
-            (): Converted image.
-        """
         image = np.fromstring(raw_buffer, dtype=np.uint8)
         raw_dims = self.get_raw_image_size()
         np.resize(image, (raw_dims[1], raw_dims[0], 2))
         return cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
 
     def yuv_2_rgb(self, raw_buffer):
-        """Convert YUV to RGB.
-        Args:
-            raw_buffer: Image
-        Returns:
-            (): Converted image.
-        """
         image = np.fromstring(raw_buffer, dtype=np.uint8)
         raw_dims = self.get_raw_image_size()
         image.resize(raw_dims[1], raw_dims[0], 2)
         return cv2.cvtColor(image, cv2.COLOR_YUV2RGB_UYVY)
 
     def bayer_rg16_2_rgb(self, raw_buffer):
-        """Convert BAYER RG16 to RGB.
-        Args:
-            raw_buffer: Image
-        Returns:
-            (): Converted image.
-        """
         image = np.fromstring(raw_buffer, dtype=np.uint16)
         raw_dims = self.get_raw_image_size()
         image.resize(raw_dims[1], raw_dims[0])
@@ -281,7 +262,6 @@ class AbstractVideoDevice(HardwareObject):
         return out_buffer
 
     def save_snapshot(self, filename, image_type="PNG"):
-        """Save snapshot image"""
         if USEQT:
             qimage = self.get_new_image()
             qimage.save(filename, image_type)
@@ -289,27 +269,7 @@ class AbstractVideoDevice(HardwareObject):
             jpgstr = self.get_jpg_image()
             open(filename, "w").write(jpgstr)
 
-    def take_snapshot(self, bw=None, return_as_array=True):
-        """Take the snapshot.
-        Args:
-            bs(bool): Return grayscale image (True)
-            return_as_array(bool): Return the image as array. Default is True.
-        Returns:
-            (): Snapshot image.
-        """
-        self.get_snapshot(bw, return_as_array)
-
     def get_snapshot(self, bw=None, return_as_array=True):
-        """Get the snapshot.
-        Args:
-            bs(bool): Return grayscale image (True)
-            return_as_array(bool): Return the image as array. Default is True.
-        Returns:
-            (): Snapshot image.
-        """
-        warnings.warn(
-            "Deprecated method, call take_snapshot instead", DeprecationWarning
-        )
         if not USEQT:
             print("get snapshot not implemented yet for non-qt mode")
             return None
@@ -322,35 +282,47 @@ class AbstractVideoDevice(HardwareObject):
             image_array = np.array(ptr).reshape(qimage.height(), qimage.width(), 4)
             if bw:
                 return np.dot(image_array[..., :3], [0.299, 0.587, 0.144])
-            return image_array
+            else:
+                return image_array
 
-        if bw:
-            return qimage.convertToFormat(QImage.Format_Mono)
-        return qimage
+        else:
+            if bw:
+                return qimage.convertToFormat(QImage.Format_Mono)
+            else:
+                return qimage
 
     def get_scaling_factor(self):
-        """Get the Scaling factor.
-        Returns:
-            (float): Scaling factor or None if does not exists
+        """
+        Descript. :
+        Returns   : Scaling factor in float. None if does not exists
         """
         return self.cam_scale_factor
 
     get_image_zoom = get_scaling_factor
 
+    def imageType(self):
+        """
+        Descript. : returns image type (not used)
+        """
+        return self.image_format
+
     def start_camera(self):
-        """Start"""
         return
 
     def set_live(self, mode):
-        """Set the live mode.
-        Args:
-            mode (bool): Live mode.
-        self.set_video_live(mode)
         """
+        Descript. :
+        """
+        return
+        if mode:
+            self.set_video_live(True)
+            self.change_owner()
+        else:
+            self.set_video_live(False)
 
     def change_owner(self):
         """LIMA specific, because it has to be root at startup
-        move this to Qt4_LimaVideo
+           move this to Qt4_LimaVideo
         """
         if os.getuid() == 0:
             try:
@@ -358,20 +330,18 @@ class AbstractVideoDevice(HardwareObject):
                 os.setuid(int(os.getenv("SUDO_UID")))
             except Exception:
                 logging.getLogger().warning(
-                    "%s: failed to change the process ownership.", self.id
+                    "%s: failed to change the process" "ownership.", self.name()
                 )
 
     def get_width(self):
-        """Get the image width.
-        Returns:
-           (int): Image width [pixels].
+        """
+        Descript. :
         """
         return int(self.image_dimensions[0])
 
     def get_height(self):
-        """Get the image height.
-        Returns:
-           (int): Image height [pixels].
+        """
+        Descript. :
         """
         return int(self.image_dimensions[1])
 
@@ -392,16 +362,17 @@ class AbstractVideoDevice(HardwareObject):
         """
         return
 
+        """if signal == "imageReceived" and self.image_polling is None:
+            self.image_polling = gevent.spawn(self.do_image_polling,
+                 self.poll_interval/1000.0)"""
+
     def refresh_video(self):
         """
         Descript. :
         """
+        pass
 
     def set_cam_encoding(self, cam_encoding):
-        """Set the image encoding.
-        Args:
-           cam_encoding(str): set the encoding type.
-        """
         if cam_encoding == "yuv422p":
             self.decoder = self.yuv_2_rgb
         elif cam_encoding == "y8":
@@ -413,79 +384,65 @@ class AbstractVideoDevice(HardwareObject):
         self.cam_encoding = cam_encoding
 
     def get_image_dimensions(self):
-        """Get the scaled width and the height of the image:
-        Returns:
-            (list): Width [mm], height [mm] list.
-        """
         raw_width, raw_height = self.get_raw_image_size()
         width = raw_width * self.scale
         height = raw_height * self.scale
         return [width, height]
 
-    # -------- Methods to be implemented by the implementing class --------
+    """  Methods to be implemented by the implementing class """
 
     def get_raw_image_size(self):
-        """Must return a two-value list necessary to avoid breaking
-        e.g. ViideoMockup
-        """
+        # Must return a two-value list necessary to avoid breaking e.g. ViideoMockup
         return [None, None]
 
     @abc.abstractmethod
     def get_image(self):
-        """The implementing class should return here the latest_image in
+        """ The implementing class should return here the latest_image in
         raw_format, followed by the width and height of the image"""
+        pass
 
     @abc.abstractmethod
     def get_gain(self):
-        """Get the camera gain"""
+        pass
 
     @abc.abstractmethod
     def set_gain(self, gain_value):
-        """Set the camera gain"""
+        pass
 
     @abc.abstractmethod
     def get_exposure_time(self):
-        """Get the camera exposure time [s]"""
+        pass
 
     @abc.abstractmethod
     def set_exposure_time(self, exposure_time_value):
-        """Set the camera exposure time [s]"""
+        pass
 
     @abc.abstractmethod
     def get_video_live(self):
-        """Get the video live mode.
-        Returns:
-            flag(bool): Live mode.
-        """
+        pass
 
     @abc.abstractmethod
     def set_video_live(self, flag):
-        """Set the video live mode.
-        Args:
-            flag(bool): Live mode.
-        """
+        pass
 
     # Other (no implementation for now. Can be overloaded, otherwise dummy)
     def get_gamma(self):
-        """Get the gamma"""
         return
 
     def set_gamma(self, gamma_value):
-        """Set the gamma"""
+        return
 
     def get_contrast(self):
-        """Get the contrast"""
         return
 
     def set_contrast(self, contrast_value):
-        """Set the contrast"""
+        return
 
     def get_brightness(self):
-        """Get the brightness"""
         return
 
     def set_brightness(self, brightness_value):
-        """Set the brightness"""
+        return
 
 
 def test_hwo(hwo):

@@ -1,6 +1,5 @@
-# encoding: utf-8
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -18,28 +17,56 @@
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with MXCuBE. If not, see <http://www.gnu.org/licenses/>.
 
-"""
-Mockup file to define _execute_spectrum method
-"""
+import time
 
-from time import sleep
-
-from mxcubecore.HardwareObjects.abstract.AbstractXRFSpectrum import AbstractXRFSpectrum
-
-__copyright__ = """ Copyright © by the MXCuBE collaboration """
-__license__ = "LGPLv3+"
+from mxcubecore.HardwareObjects.abstract.AbstractXRFSpectrum import (
+    AbstractXRFSpectrum,
+)
+from mxcubecore.BaseHardwareObjects import HardwareObject
 
 
-class XRFSpectrumMockup(AbstractXRFSpectrum):
-    """Overload the abstract method"""
+spectrum_test_data = [
+    0,
+    20,
+    340,
+    70,
+    100,
+    110,
+    120,
+    200,
+    200,
+    210,
+    1600,
+    210,
+    200,
+    200,
+    200,
+    250,
+    300,
+    200,
+    100,
+    0,
+    0,
+    0,
+    90,
+]
 
-    def _execute_spectrum(self, integration_time=None, filename=None):
-        """Specific XRF acquisition procedure.
 
-        Args:
-            integration_time (float): MCA integration time [s].
-            filename (str): Data file (full path).
-        """
-        integration_time = integration_time or self.default_integration_time
-        sleep(integration_time)
+class XRFSpectrumMockup(AbstractXRFSpectrum, HardwareObject):
+    def __init__(self, name):
+        AbstractXRFSpectrum.__init__(self)
+        HardwareObject.__init__(self, name)
+
+    def init(self):
+        pass
+
+    def is_connected(self):
         return True
+
+    def can_spectrum(self):
+        return True
+
+    def execute_spectrum_command(self, count_time, filename, adjust_transmission):
+        self.spectrum_data = spectrum_test_data
+        time.sleep(3)
+        self.spectrum_command_finished()

@@ -1,4 +1,6 @@
-#  Project name: MXCuBE
+# pylint: disable=E
+#
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -16,35 +18,33 @@
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with MXCuBE. If not, see <http://www.gnu.org/licenses/>.
 
-import json
-import logging
 import os
-import threading
+import tine
+import json
 import time
-from copy import deepcopy
+import Image
+import logging
+import threading
+import collections
 from queue import Queue
+from copy import deepcopy
+
+import gevent
 
 import cv2 as cv
-import gevent
-import Image
 import numpy as np
-import tine
+from scipy import ndimage, misc
+
 from cStringIO import StringIO
 from PIL.ImageQt import ImageQt
-from scipy import (
-    misc,
-    ndimage,
-)
 
-from mxcubecore import HardwareRepository as HWR
+from mxcubecore.utils import qt_import, Colors
+from mxcubecore.TaskUtils import task
 from mxcubecore.HardwareObjects.abstract.AbstractCollect import AbstractCollect
 from mxcubecore.HardwareObjects.QtGraphicsManager import QtGraphicsManager
-from mxcubecore.model import queue_model_objects as qmo
-from mxcubecore.TaskUtils import task
-from mxcubecore.utils import (
-    Colors,
-    qt_import,
-)
+from mxcubecore.HardwareObjects import queue_model_objects as qmo
+from mxcubecore import HardwareRepository as HWR
+
 
 __credits__ = ["EMBL Hamburg"]
 __category__ = "Task"
@@ -160,9 +160,7 @@ class EMBLXrayImaging(QtGraphicsManager, AbstractCollect):
             self.diffractometer_centring_started,
         )
         self.disconnect(
-            HWR.beamline.diffractometer,
-            "centringAccepted",
-            self.create_centring_point,
+            HWR.beamline.diffractometer, "centringAccepted", self.create_centring_point,
         )
         self.disconnect(
             HWR.beamline.diffractometer,
@@ -473,7 +471,7 @@ class EMBLXrayImaging(QtGraphicsManager, AbstractCollect):
         acq_params = data_model.acquisitions[0].acquisition_parameters
         path_template = data_model.acquisitions[0].path_template
 
-        filename_template = "%s_%d_%0" + str(path_template.precision) + "d"
+        filename_template = "%s_%d_%" + str(path_template.precision) + "d"
         config_filename = (
             filename_template
             % (
@@ -823,6 +821,7 @@ class EMBLXrayImaging(QtGraphicsManager, AbstractCollect):
                         )
                     )
         elif os.path.exists(flat_field_path):
+
             base_name_list = os.path.splitext(os.path.basename(data_path))
             ff_prefix = base_name_list[0][: -(ext_len + 1)]
             os.chdir(os.path.dirname(flat_field_path))
@@ -903,7 +902,7 @@ class EMBLXrayImaging(QtGraphicsManager, AbstractCollect):
             if relative_angle:
                 if index >= abs(self.image_count / 360.0 * relative_angle):
                     break
-            self.log.debug("display: " + str(self.current_image_index))
+            logging.getLogger("HWR").debug("display: " + str(self.current_image_index))
             self.display_image(self.current_image_index)
             self.current_image_index += direction * step
             if self.repeat_image_play and self.current_image_index >= self.image_count:
@@ -1090,7 +1089,7 @@ class ImageReadingThread(threading.Thread):
         return self.corrected_im_min_max
 
     def get_ff_image(self, raw_image_index):
-        print("get_ff_image ", raw_image_index)
+        print ("get_ff_image ", raw_image_index)
         if self.ff_ssim:
             ff_index = self.ff_ssim[raw_image_index][2] - 1
         else:
@@ -1099,5 +1098,5 @@ class ImageReadingThread(threading.Thread):
                 / float(len(self.raw_image_list))
                 * len(self.ff_image_list)
             )
-        print(ff_index)
+        print (ff_index)
         return self.ff_image_list[ff_index]

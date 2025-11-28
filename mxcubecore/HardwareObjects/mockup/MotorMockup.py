@@ -1,6 +1,7 @@
+#! /usr/bin/env python
 # encoding: utf-8
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -21,7 +22,7 @@
 """
 Example of xml config file
 
-<object class="MotorMockup">
+<device class="MotorMockup">
   <username>Mock motor</username>
   <actuator_name>mock_motor</actuator_name>
   <!-- for the mockup only -->
@@ -29,16 +30,13 @@ Example of xml config file
   <velocity>100</velocity>
   <wrap_range>None</wrap_range>
   <default_limits>[-360, 360]</default_limits>
-</object>
+</device>
 """
 
-import ast
 import time
+import ast
 
-from mxcubecore.HardwareObjects.abstract.AbstractMotor import (
-    AbstractMotor,
-    MotorStates,
-)
+from mxcubecore.HardwareObjects.abstract.AbstractMotor import AbstractMotor
 from mxcubecore.HardwareObjects.mockup.ActuatorMockup import ActuatorMockup
 
 __copyright__ = """ Copyright © 2010-2020 by the MXCuBE collaboration """
@@ -53,16 +51,14 @@ DEFAULT_WRAP_RANGE = None
 class MotorMockup(ActuatorMockup, AbstractMotor):
     """Mock Motor implementation"""
 
-    SPECIFIC_STATES = MotorStates
-
     def __init__(self, name):
         AbstractMotor.__init__(self, name)
         self._wrap_range = None
 
     def init(self):
-        """Initialisation method"""
+        """ Initialisation method """
         # get username, actuator_name and tolerance
-        super().init()
+        super(MotorMockup, self).init()
 
         # local properties
         if not self.get_velocity():
@@ -70,22 +66,19 @@ class MotorMockup(ActuatorMockup, AbstractMotor):
         if None in self.get_limits():
             self.update_limits(DEFAULT_LIMITS)
         try:
-            _wr = self.get_property("wrap_range")
-            self._wrap_range = DEFAULT_WRAP_RANGE if not _wr else ast.literal_eval(_wr)
+            wr = self.get_property("wrap_range")
+            self._wrap_range = DEFAULT_WRAP_RANGE if not wr else ast.literal_eval(wr)
         except (ValueError, SyntaxError):
             self._wrap_range = DEFAULT_WRAP_RANGE
         if self.default_value is None:
             self.default_value = DEFAULT_VALUE
-            self.update_value(self.default_value)
-
+            self.update_value(DEFAULT_VALUE)
         self.update_state(self.STATES.READY)
 
     def _move(self, value):
-        """Simulated motor movement.
+        """ Simulated motor movement
         Args:
             value (float): target position
-        Returns:
-            (float): The reached position.
         """
 
         self.update_specific_state(self.SPECIFIC_STATES.MOVING)
@@ -120,8 +113,3 @@ class MotorMockup(ActuatorMockup, AbstractMotor):
             self.update_specific_state(None)
 
         return value
-
-    def is_moving(self):
-        return (self.get_state() == self.STATES.BUSY) or (
-            self.get_state() == self.SPECIFIC_STATES.MOVING
-        )

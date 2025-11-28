@@ -13,8 +13,8 @@ This object manages the movement of several motors to predefined positions.
                         position but the user value of the motors concerned
 
 <motors>
-    <object role="role1" ... :list of motors to be moved to reach a predefined
-    <object role="role2" ...  position. the "role" will be used to referenced
+    <device role="role1" ... :list of motors to be moved to reach a predefined
+    <device role="role2" ...  position. the "role" will be used to referenced
         ...                   the motors in the definitions of the predefined
 <motors>                      positions
 
@@ -25,13 +25,13 @@ This object manages the movement of several motors to predefined positions.
 </deltas>
 
 <positions>
-    <position>
+    <poisition>
         <name>      : name of a predefined position. Must be unique in the file
         <role1>val1 : position of the motor "role1" for the predefined position
                      "name"
         <role2>val2 : position of the motor "role2" for the predefined position
                      "name"
-        <resoy>8.69565217391e-07</resoy> : for all the position, independent
+        <resoy>8.69565217391e-07</resoy> : for all the position, independant
         <beamx>100</beamx>                 value with keyword can be added,
                                            saved, read ...
     </position>
@@ -68,14 +68,14 @@ METHOD
     name:           getPositionKeyValue
     input par.:     name, key
     output par.:    value
-    description:    return the value of the independent "key" field of
+    description:    return the value of the independant "key" field of
                     the predefined position "name"
 
     name:           setPositionKeyValue
     input par.:     name, key, value
     output par.:    None
     description:    Change in the object and in the xml file the value of the
-                    independent field "key" in the predefined position "name"
+                    independant field "key" in the predefined position "name"
 
     name:           getRoles
     input par.:     None
@@ -100,11 +100,11 @@ SIGNAL
                     The parameter is the name of this position.
 
 TEMPLATE
-<object class="MultiplePositions">
+<equipment class="MultiplePositions">
     <username>VLM Zoom</username>
     <mode>absolute</mode>
     <motors>
-        <object role="zoom" hwrid="/berru/zoom"></object>
+        <device role="zoom" hwrid="/berru/zoom"></device>
     </motors>
 
     <deltas>
@@ -137,19 +137,18 @@ TEMPLATE
             <beamy>200</beamy>
         </position>
     </positions>
-</object>"""
+</equipment>"""
 
 try:
     from xml.etree import cElementTree  # python2.5
 except ImportError:
     import cElementTree
 
+from mxcubecore.BaseHardwareObjects import Equipment
 import logging
 
-from mxcubecore.BaseHardwareObjects import HardwareObject
 
-
-class MultiplePositions(HardwareObject):
+class MultiplePositions(Equipment):
     def init(self):
         try:
             self.mode

@@ -1,14 +1,14 @@
 """
 CATS maintenance mockup.
 """
-
 import logging
-import time
+
+from mxcubecore.TaskUtils import task
+from mxcubecore.BaseHardwareObjects import Equipment
 
 import gevent
+import time
 
-from mxcubecore.BaseHardwareObjects import HardwareObject
-from mxcubecore.TaskUtils import task
 
 __author__ = "Mikel Eguiraun"
 __credits__ = ["The MxCuBE collaboration"]
@@ -33,7 +33,8 @@ TOOL_TO_STR = {
 }
 
 
-class CatsMaintMockup(HardwareObject):
+class CatsMaintMockup(Equipment):
+
     __TYPE__ = "CATS"
     NO_OF_LIDS = 3
 
@@ -42,8 +43,8 @@ class CatsMaintMockup(HardwareObject):
     BESSY BL14.1 installation with 3 lids
     """
 
-    def __init__(self, name):
-        super().__init__(name)
+    def __init__(self, *args, **kwargs):
+        Equipment.__init__(self, *args, **kwargs)
 
         self._state = "READY"
         self._running = 0
@@ -58,6 +59,7 @@ class CatsMaintMockup(HardwareObject):
         self._currenttool = 1
 
     def init(self):
+
         try:
             self.cats_model = self.cats_device.read_attribute("CatsModel").value
         except Exception:
@@ -192,7 +194,7 @@ class CatsMaintMockup(HardwareObject):
         except Exception as ex:
             exception = ex
         if exception is not None:
-            raise exception
+            raise exception  # pylint: disable-msg=E0702
         return ret
 
     #########################           PRIVATE           #########################
@@ -250,21 +252,21 @@ class CatsMaintMockup(HardwareObject):
 
     def get_global_state(self):
         """
-        Update clients with a global state that
-        contains different:
+           Update clients with a global state that
+           contains different:
 
-        - first param (state_dict):
-            collection of state bits
+           - first param (state_dict):
+               collection of state bits
 
-        - second param (cmd_state):
-            list of command identifiers and the
-            status of each of them True/False
-            representing whether the command is
-            currently available or not
+           - second param (cmd_state):
+               list of command identifiers and the
+               status of each of them True/False
+               representing whether the command is
+               currently available or not
 
-        - message
-            a message describing current state information
-            as a string
+           - message
+               a message describing current state information
+               as a string
         """
         _ready = str(self._state) in ("READY", "ON")
 
@@ -289,8 +291,8 @@ class CatsMaintMockup(HardwareObject):
         }
 
         cmd_state = {
-            "PowerOn": (not self._powered) and _ready,
-            "PowerOff": (self._powered) and _ready,
+            "powerOn": (not self._powered) and _ready,
+            "powerOff": (self._powered) and _ready,
             "regulon": (not self._regulating) and _ready,
             "openlid1": (not self._lid1state) and self._powered and _ready,
             "closelid1": self._lid1state and self._powered and _ready,
@@ -309,18 +311,18 @@ class CatsMaintMockup(HardwareObject):
         return state_dict, cmd_state, message
 
     def get_cmd_info(self):
-        """return information about existing commands for this object
-        the information is organized as a list
-        with each element contains
-        [ cmd_name,  display_name, category ]
+        """ return information about existing commands for this object
+           the information is organized as a list
+           with each element contains
+           [ cmd_name,  display_name, category ]
         """
         """ [cmd_id, cmd_display_name, nb_args, cmd_category, description ] """
         cmd_list = [
             [
                 "Power",
                 [
-                    ["PowerOn", "PowerOn", "Switch Power On"],
-                    ["PowerOff", "PowerOff", "Switch Power Off"],
+                    ["powerOn", "PowerOn", "Switch Power On"],
+                    ["powerOff", "PowerOff", "Switch Power Off"],
                     ["regulon", "Regulation On", "Swich LN2 Regulation On"],
                 ],
             ],
@@ -370,6 +372,8 @@ class CatsMaintMockup(HardwareObject):
         return ret
 
     def send_command(self, cmd_name, args=None):
+
+        #
         lid = 1
         toolcal = 0
         tool = self.get_current_tool()
@@ -392,9 +396,9 @@ class CatsMaintMockup(HardwareObject):
             else:
                 raise Exception("Cannot detect type of TOOL in Cats. Command ignored")
 
-        if cmd_name == "PowerOn":
+        if cmd_name == "powerOn":
             self._do_power_state(True)
-        if cmd_name == "PowerOff":
+        if cmd_name == "powerOff":
             self._do_power_state(False)
 
         if cmd_name == "regulon":

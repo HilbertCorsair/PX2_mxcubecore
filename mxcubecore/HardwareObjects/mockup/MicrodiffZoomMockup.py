@@ -8,15 +8,11 @@ Example xml file
 EL6": 6}</values>
 </object>
 """
-
 from enum import Enum
-
 import gevent
 
-from mxcubecore.HardwareObjects.abstract.AbstractNState import (
-    AbstractNState,
-    BaseValueEnum,
-)
+from mxcubecore.HardwareObjects.abstract.AbstractNState import AbstractNState
+from mxcubecore.HardwareObjects.abstract.AbstractNState import BaseValueEnum
 
 
 class MicrodiffZoomMockup(AbstractNState):
@@ -29,16 +25,17 @@ class MicrodiffZoomMockup(AbstractNState):
         """Initialize the zoom"""
         AbstractNState.init(self)
 
+        self.set_limits(limits=(1, 10))
         self.initialise_values()
         _len = len(self.VALUES) - 1
         if _len > 0:
             # we can only assume that the values are consecutive integers
             # so the limits correspond to the keys
-            limits = (0, _len - 1)
+            limits = (1, _len)
             self.set_limits(limits)
         else:
             # Normally we get the limits from the hardware
-            limits = (0, 9)
+            limits = (1, 10)
             self.set_limits(limits)
             # there is nothing in the xml file, create ValueEnum from the limits
             self._initialise_values()
@@ -46,7 +43,7 @@ class MicrodiffZoomMockup(AbstractNState):
         self.update_limits(limits)
 
         # we assume that the names are LEVEL%d, starting from 1
-        self.update_value(self.VALUES.LEVEL1)
+        self.update_value(self.get_value())
 
         self.update_state(self.STATES.READY)
 
@@ -60,11 +57,11 @@ class MicrodiffZoomMockup(AbstractNState):
         self.update_state(self.STATES.READY)
 
     def set_limits(self, limits=(None, None)):
-        """Overridden from AbstractActuator"""
+        """Overrriden from AbstractActuator"""
         self._nominal_limits = limits
 
     def update_limits(self, limits=None):
-        """Overridden from AbstractNState"""
+        """Overrriden from AbstractNState"""
         if limits is None:
             limits = self.get_limits()
 
@@ -72,18 +69,17 @@ class MicrodiffZoomMockup(AbstractNState):
         self.emit("limitsChanged", (limits,))
 
     def _set_value(self, value):
-        """Overridden from AbstractActuator"""
+        """Overrriden from AbstractActuator"""
         gevent.spawn(self._set_zoom, value)
 
     def get_value(self):
-        """Overridden from AbstractActuator"""
+        """Overrriden from AbstractActuator"""
         return self._nominal_value
 
     def _initialise_values(self):
         """Initialise the ValueEnum"""
         low, high = self.get_limits()
-
-        values = {"LEVEL%s" % str(v): v for v in range(low + 1, high + 2)}
+        values = {"LEVEL%s" % str(v): v for v in range(low, high + 1)}
         self.VALUES = Enum(
             "ValueEnum",
             dict(values, **{item.name: item.value for item in BaseValueEnum}),

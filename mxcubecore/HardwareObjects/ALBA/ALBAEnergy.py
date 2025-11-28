@@ -1,10 +1,12 @@
+import logging
+
+from mxcubecore.BaseHardwareObjects import Device
 from mxcubecore import HardwareRepository as HWR
-from mxcubecore.BaseHardwareObjects import HardwareObject
 
 
-class ALBAEnergy(HardwareObject):
+class ALBAEnergy(Device):
     def __init__(self, *args):
-        super().__init__(*args)
+        Device.__init__(self, *args)
         self.energy_position = None
         self.wavelength_position = None
 
@@ -43,7 +45,9 @@ class ALBAEnergy(HardwareObject):
     def set_value(self, value):
         current_egy = self.get_value()
 
-        self.log.debug("moving energy to %s. now is %s" % (value, current_egy))
+        logging.getLogger("HWR").debug(
+            "moving energy to %s. now is %s" % (value, current_egy)
+        )
         HWR.beamline.energy.set_value(value)
 
     def wait_move_energy_done(self):
@@ -60,6 +64,7 @@ class ALBAEnergy(HardwareObject):
 
 
 def test_hwo(hwo):
+
     print("Wavelength is: ", hwo.get_wavelength())
     print("Energy limits are: ", hwo.get_limits())
     print("Wavelength limits are: ", hwo.get_wavelength_limits())

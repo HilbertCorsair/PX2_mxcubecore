@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -33,7 +33,7 @@ in the XML file.
 
 Example Hardware Object XML file :
 ==================================
-<object class="QtLimaVideo">
+<device class="QtLimaVideo">
    <type>basler</type>
    <encoding>yuv422p</encoding>
    <address>84.89.227.6</address>
@@ -41,10 +41,13 @@ Example Hardware Object XML file :
    <exposure>0.01</exposure>
    <mirror>(False, False)</mirror>
    <interval>30</interval>
-</object>
+</device>
 """
+import logging
 
-from mxcubecore.HardwareObjects.abstract.AbstractVideoDevice import AbstractVideoDevice
+from mxcubecore.HardwareObjects.abstract.AbstractVideoDevice import (
+    AbstractVideoDevice,
+)
 
 try:
     from Lima import Core
@@ -90,7 +93,9 @@ class QtLimaVideo(AbstractVideoDevice):
             self.camera = Prosilica.Camera(self.cam_address, self.master_mode, False)
             self.interface = Prosilica.Interface(self.camera)
         elif self.cam_type == "basler":
-            self.log.info("Connecting to camera with address %s" % self.cam_address)
+            logging.getLogger("HWR").info(
+                "Connecting to camera with address %s" % self.cam_address
+            )
             self.camera = Basler.Camera(self.cam_address)
             self.interface = Basler.Interface(self.camera)
 

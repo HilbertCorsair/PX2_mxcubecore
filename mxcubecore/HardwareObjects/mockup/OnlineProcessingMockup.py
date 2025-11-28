@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -19,12 +19,12 @@
 
 
 import time
-
 import numpy
 
 from mxcubecore.HardwareObjects.abstract.AbstractOnlineProcessing import (
     AbstractOnlineProcessing,
 )
+
 
 __license__ = "LGPLv3"
 
@@ -33,11 +33,11 @@ class OnlineProcessingMockup(AbstractOnlineProcessing):
     def __init__(self, name):
         AbstractOnlineProcessing.__init__(self, name)
 
-        self.result_plot_type = None
+        self.result_type = None
 
     def init(self):
         AbstractOnlineProcessing.init(self)
-        self.result_plot_type = self.get_property("result_plot_type", "random")
+        self.result_type = self.get_property("result_type", "random")
 
     def run_processing(self, data_collection):
         """
@@ -50,19 +50,18 @@ class OnlineProcessingMockup(AbstractOnlineProcessing):
         """
         self.data_collection = data_collection
         self.prepare_processing()
-        self.started = True
 
         index = 0
         for key in self.results_raw.keys():
-            if self.result_plot_type == "first":
+            if self.result_type == "first":
                 self.results_raw[key][0] = 1
-            elif self.result_plot_type == "last":
+            elif self.result_type == "last":
                 self.results_raw[key][self.params_dict["images_num"] - 1] = 1
-            elif self.result_plot_type == "middle":
+            elif self.result_type == "middle":
                 self.results_raw[key][self.params_dict["images_num"] / 2 - 1] = 1
                 self.results_raw[key][self.params_dict["images_num"] / 2] = 3
                 self.results_raw[key][self.params_dict["images_num"] / 2 + 1] = 2.5
-            elif self.result_plot_type == "linear":
+            elif self.result_type == "linear":
                 self.results_raw[key] = (
                     numpy.linspace(
                         0,
@@ -71,7 +70,7 @@ class OnlineProcessingMockup(AbstractOnlineProcessing):
                     )
                     + index
                 )
-            elif self.result_plot_type == "random":
+            elif self.result_type == "random":
                 self.results_raw[key] = numpy.random.randint(
                     1, self.params_dict["images_num"], self.params_dict["images_num"]
                 )
@@ -108,6 +107,6 @@ class OnlineProcessingMockup(AbstractOnlineProcessing):
                 break
             else:
                 time.sleep(self.params_dict["exp_time"])
-        self.align_processing_results(0, self.params_dict["images_num"] - 1)
+        #self.align_processing_results(0, self.params_dict["images_num"] - 1)
         self.emit("processingResultsUpdate", True)
         self.set_processing_status("Success")

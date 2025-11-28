@@ -1,6 +1,6 @@
 # encoding: utf-8
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -20,26 +20,20 @@
 """
 Microdiff with Exporter implementation of AbstartNState
 Example xml file:
-<object class="ExporterNState">
+<device class="ExporterNState">
   <username>Fluorescence Detector</username>
   <exporter_address>wid30bmd2s:9001</exporter_address>
   <value_channel_name>FluoDetectorIsBack</value_channel_name>
   <state_channel_name>State</state_channel_name>
   <values>{"IN": False, "OUT": True}</values>
   <value_state>True</value_state>
-</object>
+</device>
 """
-
 from enum import Enum
-
-from gevent import (
-    Timeout,
-    sleep,
-)
-
+from gevent import Timeout, sleep
+from mxcubecore.HardwareObjects.abstract.AbstractNState import AbstractNState
 from mxcubecore.Command.Exporter import Exporter
 from mxcubecore.Command.exporter.ExporterStates import ExporterStates
-from mxcubecore.HardwareObjects.abstract.AbstractNState import AbstractNState
 
 __copyright__ = """ Copyright © 2020 by the MXCuBE collaboration """
 __license__ = "LGPLv3+"
@@ -51,7 +45,7 @@ class ExporterNState(AbstractNState):
     SPECIFIC_STATES = ExporterStates
 
     def __init__(self, name):
-        super().__init__(name)
+        AbstractNState.__init__(self, name)
         self._exporter = None
         self.value_channel = None
         self.state_channel = None
@@ -59,7 +53,7 @@ class ExporterNState(AbstractNState):
 
     def init(self):
         """Initialise the device"""
-        super().init()
+        AbstractNState.init(self)
         value_channel = self.get_property("value_channel_name")
         # use the value to check if action finished.
         self.use_value_as_state = self.get_property("value_state")
@@ -77,7 +71,7 @@ class ExporterNState(AbstractNState):
             },
             value_channel,
         )
-        self.value_channel.connect_signal("update", self._update_value)
+        self.value_channel.connect_signal("update", self.update_value)
 
         self.state_channel = self.add_channel(
             {
@@ -110,11 +104,8 @@ class ExporterNState(AbstractNState):
             while not self.get_state() == self.STATES.READY:
                 sleep(0.5)
 
-    def _update_value(self, value):
-        super().update_value(self.value_to_enum(value))
-
     def _update_state(self, state=None):
-        """To be used to update the state when emitting the "update" signal.
+        """To be used to update the state when emiting the "update" signal.
         Args:
             state (str): optional state value
         Returns:
@@ -123,12 +114,11 @@ class ExporterNState(AbstractNState):
         if not state:
             state = self.get_state()
         else:
-            state = self._str2state(state)
-
+            state = self._value2state(state)
         return self.update_state(state)
 
-    def _str2state(self, state):
-        """Convert string state to HardwareObjectState enum value.
+    def _value2state(self, state):
+        """Convert string state to HardwareObjectState enum value
         Args:
             state (str): the state
         Returns:
@@ -145,7 +135,7 @@ class ExporterNState(AbstractNState):
             (enum 'HardwareObjectState'): Device state.
         """
         state = self.state_channel.get_value()
-        return self._str2state(state)
+        return self._value2state(state)
 
     def abort(self):
         """Stop the action."""
@@ -157,7 +147,7 @@ class ExporterNState(AbstractNState):
         Args:
             value (str, int, float or enum): Value to be set.
         """
-        # NB Workaround because diffractomer does not send event on
+        # NB Workaround beacuse diffractomer does not send event on
         # change of actuators (light, scintillator, cryostream...)
         self.update_state(self.STATES.BUSY)
 

@@ -1,6 +1,6 @@
 from warnings import warn
-
 from BlissMotor import BlissMotor
+import logging
 
 
 class BlissMotorWPositions(BlissMotor):
@@ -21,7 +21,9 @@ class BlissMotorWPositions(BlissMotor):
         try:
             positions = self["positions"]
         except Exception:
-            self.log.error("%s does not define positions.", str(self.name()))
+            logging.getLogger("HWR").error(
+                "%s does not define positions.", str(self.name())
+            )
         else:
             for definedPosition in positions:
                 positionUsername = definedPosition.get_property("username")
@@ -29,7 +31,7 @@ class BlissMotorWPositions(BlissMotor):
                 try:
                     offset = float(definedPosition.get_property("offset"))
                 except Exception:
-                    self.log.warning(
+                    logging.getLogger("HWR").warning(
                         "%s, ignoring position %s: invalid offset.",
                         str(self.name()),
                         positionUsername,
@@ -90,7 +92,7 @@ class BlissMotorWPositions(BlissMotor):
         try:
             self.set_value(self.predefinedPositions[positionName])
         except Exception:
-            self.log.exception(
+            logging.getLogger("HWR").exception(
                 "Cannot move motor %s: invalid position name.", str(self.username)
             )
 
@@ -113,4 +115,4 @@ class BlissMotorWPositions(BlissMotor):
             self.predefinedPositions[str(positionName)] = float(positionOffset)
             self.sortPredefinedPositionsList()
         except Exception:
-            self.log.exception("Cannot set new predefined position")
+            logging.getLogger("HWR").exception("Cannot set new predefined position")

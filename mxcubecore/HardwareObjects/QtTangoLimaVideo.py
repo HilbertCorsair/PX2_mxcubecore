@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -29,7 +29,7 @@ the QtLimaVideo module instead
 [Configuration]
 Example Hardware Object XML file :
 ==================================
-<object class="QtLimaVideo">
+<device class="QtLimaVideo">
    <type>basler</type>
    <encoding>yuv422p</encoding>
    <tangoname>bl13/eh/lima_oav</tangoname>
@@ -37,15 +37,17 @@ Example Hardware Object XML file :
    <exposure>0.01</exposure>
    <mirror>(False, False)</mirror>
    <interval>30</interval>
-</object>
+</device>
 """
 
 import struct
-
 import numpy as np
+
 import PyTango
 
-from mxcubecore.HardwareObjects.abstract.AbstractVideoDevice import AbstractVideoDevice
+from mxcubecore.HardwareObjects.abstract.AbstractVideoDevice import (
+    AbstractVideoDevice,
+)
 
 
 class QtTangoLimaVideo(AbstractVideoDevice):
@@ -94,6 +96,7 @@ class QtTangoLimaVideo(AbstractVideoDevice):
     """ Overloading of AbstractVideoDevice methods """
 
     def get_raw_image_size(self):
+
         # in case width and height not set in xml return server values
         if None not in [self.width, self.height]:
             return [self.width, self.height]

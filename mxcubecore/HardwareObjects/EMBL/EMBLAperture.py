@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -19,7 +19,9 @@
 
 """Inherited from AbstracAperture"""
 
-from mxcubecore.HardwareObjects.abstract.AbstractAperture import AbstractAperture
+from mxcubecore.HardwareObjects.abstract.AbstractAperture import (
+    AbstractAperture,
+)
 
 __credits__ = ["EMBL Hamburg"]
 __license__ = "LGPLv3+"
@@ -31,7 +33,7 @@ DEFAULT_POSITION_LIST = ("BEAM", "OFF", "PARK")
 
 class EMBLAperture(AbstractAperture):
     """Aperture control hwobj uses exporter or Tine channels and commands
-    to control aperture position
+       to control aperture position
     """
 
     def __init__(self, name):

@@ -1,23 +1,24 @@
-"""A simple client for MetadataManager and MetaExperiment"""
+#!/usr/bin/env python
 
+"""A simple client for MetadataManager and MetaExperiment
+"""
 from __future__ import print_function
-
-import logging
-import math
 import os
-import smtplib
 import sys
+import math
 import time
+import logging
+import PyTango.client
 import traceback
 from email.mime.text import MIMEText
+import smtplib
 
-import PyTango.client
-
+from mxcubecore.ConvertUtils import string_types
 from mxcubecore import HardwareRepository as HWR
-from mxcubecore.utils.conversion import string_types
 
 
 class MetadataManagerClient(object):
+
     """
     A client for the MetadataManager and MetaExperiment tango Devices
 
@@ -83,24 +84,13 @@ class MetadataManagerClient(object):
                     break
             except Exception as e:
                 caughtException = e
-                print(
-                    "Unexpected error in MetadataManagerClient._setAttribute: {0}".format(
-                        e
-                    )
-                )
-                print(
-                    "proxy = '{0}', attributeName = '{1}', newValue = '{2}'".format(
-                        proxy, attributeName, newValue
-                    )
-                )
+                print("Unexpected error in MetadataManagerClient._setAttribute: {0}".format(e))
+                print("proxy = '{0}', attributeName = '{1}', newValue = '{2}'".format(
+                    proxy, attributeName, newValue))
                 print("Trying again, trial #{0}".format(counter))
                 time.sleep(1)
         if currentValue != newValue:
-            raise RuntimeError(
-                "Cannot set '{0}' attribute '{1}' to '{2}' due to {3}!".format(
-                    proxy, attributeName, newValue, caughtException
-                )
-            )
+            raise RuntimeError("Cannot set '{0}' attribute '{1}' to '{2}' due to {3}!".format(proxy, attributeName, newValue, caughtException))
 
     def __setDataRoot(self, dataRoot):
         try:
@@ -111,7 +101,7 @@ class MetadataManagerClient(object):
             raise
 
     def __setProposal(self, proposal):
-        """Set proposal should be done before setting the data root"""
+        """ Set proposal should be done before stting the data root """
         try:
             MetadataManagerClient.metaExperiment.proposal = proposal
             self.proposal = proposal
@@ -143,32 +133,24 @@ class MetadataManagerClient(object):
             raise
 
     def start(self, dataRoot, proposal, sampleName, datasetName):
-        """Starts a new dataset"""
+        """ Starts a new dataset """
         if MetadataManagerClient.metaExperiment:
             try:
                 # setting proposal
                 # self.__setProposal(proposal)
-                self.__setAttribute(
-                    MetadataManagerClient.metaExperiment, "proposal", proposal
-                )
+                self.__setAttribute(MetadataManagerClient.metaExperiment, "proposal", proposal)
 
                 # setting dataRoot
                 # self.__setDataRoot(dataRoot)
-                self.__setAttribute(
-                    MetadataManagerClient.metaExperiment, "dataRoot", dataRoot
-                )
+                self.__setAttribute(MetadataManagerClient.metaExperiment, "dataRoot", dataRoot)
 
                 # setting sample
                 # self.__setSample(sampleName)
-                self.__setAttribute(
-                    MetadataManagerClient.metaExperiment, "sample", sampleName
-                )
+                self.__setAttribute(MetadataManagerClient.metaExperiment, "sample", sampleName)
 
                 # setting dataset
                 # self.__setDataset(datasetName)
-                self.__setAttribute(
-                    MetadataManagerClient.metadataManager, "scanName", datasetName
-                )
+                self.__setAttribute(MetadataManagerClient.metadataManager, "scanName", datasetName)
                 self.datasetName = datasetName
 
                 # setting datasetName
@@ -235,10 +217,10 @@ class MXCuBEMetadataClient(object):
             listTo = self._listEmailReceivers
             listCC = []
             listBCC = []
-            mime_text_message["Subject"] = (
-                "Metadata upload error on {0} for proposal {1}".format(
-                    self._beamline, self._proposal
-                )
+            mime_text_message[
+                "Subject"
+            ] = "Metadata upload error on {0} for proposal {1}".format(
+                self._beamline, self._proposal
             )
             mime_text_message["From"] = replyTo
             mime_text_message["To"] = COMMASPACE.join(listTo)
@@ -253,7 +235,7 @@ class MXCuBEMetadataClient(object):
                 )
                 smtp.quit()
             except Exception:
-                logging.getLogger("HWR").exception("")
+                pass
         return errorMessage
 
     def start(self, data_collect_parameters):
@@ -318,31 +300,21 @@ class MXCuBEMetadataClient(object):
         if template.endswith(".h5"):
             if math.fabs(overlap) > 1:
                 for image_number in range(1, number_of_images + 1):
-                    h5_master_file_name = (
-                        "{prefix}_{run_number}_{image_number}_master.h5".format(
-                            prefix=prefix,
-                            run_number=run_number,
-                            image_number=image_number,
-                        )
+                    h5_master_file_name = "{prefix}_{run_number}_{image_number}_master.h5".format(
+                        prefix=prefix, run_number=run_number, image_number=image_number
                     )
                     h5_master_file_path = os.path.join(directory, h5_master_file_name)
                     self._metadataManagerClient.appendFile(h5_master_file_path)
-                    h5_data_file_name = (
-                        "{prefix}_{run_number}_{image_number}_data_000001.h5".format(
-                            prefix=prefix,
-                            run_number=run_number,
-                            image_number=image_number,
-                        )
+                    h5_data_file_name = "{prefix}_{run_number}_{image_number}_data_000001.h5".format(
+                        prefix=prefix, run_number=run_number, image_number=image_number
                     )
                     h5_data_file_path = os.path.join(directory, h5_data_file_name)
                     self._metadataManagerClient.appendFile(h5_data_file_path)
             else:
-                h5_master_file_name = (
-                    "{prefix}_{run_number}_{start_image_number}_master.h5".format(
-                        prefix=prefix,
-                        run_number=run_number,
-                        start_image_number=start_image_number,
-                    )
+                h5_master_file_name = "{prefix}_{run_number}_{start_image_number}_master.h5".format(
+                    prefix=prefix,
+                    run_number=run_number,
+                    start_image_number=start_image_number,
                 )
                 h5_master_file_path = os.path.join(directory, h5_master_file_name)
                 self._metadataManagerClient.appendFile(h5_master_file_path)

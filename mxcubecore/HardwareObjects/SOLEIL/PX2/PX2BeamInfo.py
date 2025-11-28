@@ -8,7 +8,7 @@ and size.
 
 This is the Soleil PX1 version
 
-[Emitted signals]
+[Emited signals]
 
 beamInfoChanged
 beamPosChanged
@@ -17,29 +17,28 @@ beamPosChanged
 
 [Example XML file]
 
-<object class = "BeaminfoPX2">
+<device class = "BeaminfoPX2">
   <username>Beamstop</username>
-  <channel type="tango" tangoname="i11-ma-cx1/ex/md2" polling="1000" name="beamsizex">BeamSizeHorizontal</channel>
-  <channel type="tango" tangoname="i11-ma-cx1/ex/md2" polling="1000" name="beamsizey">BeamSizeVertical</channel>
-  <channel type="tango" tangoname="i11-ma-cx1/ex/md2" polling="1000" name="positionx">BeamPositionHorizontal</channel>
-  <channel type="tango" tangoname="i11-ma-cx1/ex/md2" polling="1000" name="positiony">BeamPositionVertical</channel>
+  <channel type="tango" tangoname="i11-ma-cx1/ex/md3" polling="1000" name="beamsizex">BeamSizeHorizontal</channel>
+  <channel type="tango" tangoname="i11-ma-cx1/ex/md3" polling="1000" name="beamsizey">BeamSizeVertical</channel>
+  <channel type="tango" tangoname="i11-ma-cx1/ex/md3" polling="1000" name="positionx">BeamPositionHorizontal</channel>
+  <channel type="tango" tangoname="i11-ma-cx1/ex/md3" polling="1000" name="positiony">BeamPositionVertical</channel>
   <object  role="zoom"  hwrid="/zoom"></object>
-</object>
+</device>
 
 
 
 """
 
 import logging
+from mxcubecore.BaseHardwareObjects import Equipment
 
-from mxcubecore.BaseHardwareObjects import HardwareObject
 
-
-class PX2BeamInfo(HardwareObject):
+class PX2BeamInfo(Equipment):
     def __init__(self, *args):
-        super().__init__(*args)
+        Equipment.__init__(self, *args)
 
-        self.beam_position = [328, 220]  # [None, None]
+        self.beam_position = [608, 512]  # [800, 600]  # [None, None]
         self.beam_size = [0.010, 0.005]  # [None, None]
         self.shape = "rectangular"
 
@@ -66,7 +65,7 @@ class PX2BeamInfo(HardwareObject):
             self.chanBeamSizeX.connect_signal("update", self.beamSizeXChanged)
         except KeyError:
             logging.getLogger().warning(
-                "%s: cannot connect to beamsize x channel ", self.id
+                "%s: cannot connect to beamsize x channel ", self.name()
             )
 
         try:
@@ -74,7 +73,7 @@ class PX2BeamInfo(HardwareObject):
             self.chanBeamSizeY.connect_signal("update", self.beamSizeYChanged)
         except KeyError:
             logging.getLogger().warning(
-                "%s: cannot connect to beamsize y channel ", self.id
+                "%s: cannot connect to beamsize y channel ", self.name()
             )
 
         try:
@@ -82,7 +81,7 @@ class PX2BeamInfo(HardwareObject):
             self.chanBeamPosX.connect_signal("update", self.beamPosXChanged)
         except KeyError:
             logging.getLogger().warning(
-                "%s: cannot connect to beamposition x channel ", self.id
+                "%s: cannot connect to beamposition x channel ", self.name()
             )
 
         try:
@@ -90,10 +89,10 @@ class PX2BeamInfo(HardwareObject):
             self.chanBeamPosY.connect_signal("update", self.beamPosYChanged)
         except KeyError:
             logging.getLogger().warning(
-                "%s: cannot connect to beamposition z channel ", self.id
+                "%s: cannot connect to beamposition z channel ", self.name()
             )
 
-        self.zoomMotor = self.get_deviceby_role("zoom")
+        self.zoomMotor = self.get_device_by_role("zoom")
 
         self.beam_position[0], self.beam_position[1] = (
             self.chanBeamPosX.value,
@@ -137,9 +136,9 @@ class PX2BeamInfo(HardwareObject):
         )
 
     def sizeUpdated(self):
-        # TODO check values give by md2 it appears that  beamSizeXChanged beamSize
+        # TODO check values give by md it appears that  beamSizeXChanged beamSize
         self.beam_info_dict["size_x"] = 0.010  # in micro channel in MD2 doesn't work
-        self.beam_info_dict["size_y"] = 0.005
+        self.beam_info_dict["size_y"] = 0.005  #
         self.emit("beamInfoChanged", (self.beam_info_dict,))
 
     def sizeUpdated2(self):
@@ -188,3 +187,8 @@ class PX2BeamInfo(HardwareObject):
 
     def get_beam_divergence_ver(self):
         return self.get_property("beam_divergence_vert")
+
+    def get_beam_divergence(self):
+        h = self.get_beam_divergence_hor()
+        v = self.get_beam_divergence_ver()
+        return h, v

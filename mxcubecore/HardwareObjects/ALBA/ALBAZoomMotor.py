@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -31,7 +31,7 @@ Hardware Object is used to manipulate the zoom of the OAV camera.
 
 [Commands]
 
-[Emitted signals]
+[Emited signals]
 - stateChanged
 - predefinedPositionChanged
 
@@ -43,7 +43,7 @@ Hardware Object is used to manipulate the zoom of the OAV camera.
 
 Example Hardware Object XML file :
 ==================================
-<object class="ALBAZoomMotor">
+<device class="ALBAZoomMotor">
   <username>Zoom</username>
   <taurusname>ioregister/eh_zoom_tangoior_ctrl/2</taurusname>
   <alias>zoom</alias>
@@ -53,13 +53,13 @@ Example Hardware Object XML file :
   <channel type="sardana" name="labels">Labels</channel>
   <interval>200</interval>
   <threshold>0.001</threshold>
-</object>
+</device>
 """
-
-import PyTango
 
 from mxcubecore import BaseHardwareObjects
 from mxcubecore.HardwareObjects.abstract.AbstractMotor import AbstractMotor
+import logging
+import PyTango
 
 __author__ = "Bixente Rey"
 __credits__ = ["MXCuBE collaboration"]
@@ -71,13 +71,14 @@ __status__ = "Draft"
 
 
 class ALBAZoomMotor(BaseHardwareObjects.Device, AbstractMotor):
+
     INIT, FAULT, READY, MOVING, ONLIMIT = range(5)
 
     def __init__(self, name):
-        super().__init__(name)
+        BaseHardwareObjects.Device.__init__(self, name)
 
     def init(self):
-        self.log.debug("Initializing zoom motor IOR")
+        logging.getLogger("HWR").debug("Initializing zoom motor IOR")
         self.positionChannel = self.get_channel_object("position")
         self.stateChannel = self.get_channel_object("state")
         self.labelsChannel = self.get_channel_object("labels")
@@ -96,22 +97,22 @@ class ALBAZoomMotor(BaseHardwareObjects.Device, AbstractMotor):
             #    retlist.append(int(pos))
             pos = str(label.replace(":", " "))
             retlist.append(pos)
-        self.log.debug("Zoom positions list: %s" % repr(retlist))
+        logging.getLogger("HWR").debug("Zoom positions list: %s" % repr(retlist))
         new_retlist = []
         for n, e in enumerate(retlist):
             name = e.split()
             new_retlist.append("%s %s" % (n + 1, name[0]))
-        self.log.debug("Zoom positions list: %s" % repr(new_retlist))
+        logging.getLogger("HWR").debug("Zoom positions list: %s" % repr(new_retlist))
 
         # retlist = ["z1 1","z2 2"]
-        # self.log.debug("Zoom positions list: %s" % repr(retlist))
+        # logging.getLogger("HWR").debug("Zoom positions list: %s" % repr(retlist))
         return new_retlist
 
     def moveToPosition(self, posno):
         no = posno.split()[0]
-        self.log.debug("type %s" % type(no))
+        logging.getLogger("HWR").debug("type %s" % type(no))
         #        no = posno
-        self.log.debug("Moving to position %s" % no)
+        logging.getLogger("HWR").debug("Moving to position %s" % no)
         state = self.positionChannel.set_value(int(no))
 
     def motorIsMoving(self):
@@ -146,14 +147,16 @@ class ALBAZoomMotor(BaseHardwareObjects.Device, AbstractMotor):
         try:
             n = int(self.positionChannel.get_value())
             value = "%s z%s" % (n, n)
-            self.log.debug("get_current_position_name: %s" % repr(value))
+            logging.getLogger("HWR").debug(
+                "get_current_position_name: %s" % repr(value)
+            )
             return value
         except Exception:
-            self.log.debug("cannot get name zoom value")
+            logging.getLogger("HWR").debug("cannot get name zoom value")
             return None
 
     def stateChanged(self, state):
-        self.log.debug("stateChanged emitted: %s" % state)
+        logging.getLogger("HWR").debug("stateChanged emitted: %s" % state)
         the_state = self.get_state()
         if the_state != self.currentstate:
             self.currentstate = the_state
@@ -163,7 +166,7 @@ class ALBAZoomMotor(BaseHardwareObjects.Device, AbstractMotor):
         previous_position = self.currentposition
         self.currentposition = self.get_current_position_name()
         if self.currentposition != previous_position:
-            self.log.debug(
+            logging.getLogger("HWR").debug(
                 "predefinedPositionChanged emitted: %s" % self.currentposition
             )
             self.emit("predefinedPositionChanged", (self.currentposition, 0))
@@ -174,6 +177,7 @@ class ALBAZoomMotor(BaseHardwareObjects.Device, AbstractMotor):
 
 
 def test_hwo(zoom):
+
     print(type(zoom.get_state()))
 
     print("     Zoom position is : ", zoom.get_value())

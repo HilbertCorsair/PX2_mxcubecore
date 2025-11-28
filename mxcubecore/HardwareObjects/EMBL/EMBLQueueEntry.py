@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -23,13 +23,14 @@ Module contains EMBL specific queue entries
 
 import logging
 
-from mxcubecore import HardwareRepository as HWR
 from mxcubecore.dispatcher import dispatcher
-from mxcubecore.queue_entry.base_queue_entry import (
-    QUEUE_ENTRY_STATUS,
+from mxcubecore.HardwareObjects.base_queue_entry import (
     BaseQueueEntry,
     QueueExecutionException,
+    QUEUE_ENTRY_STATUS,
 )
+from mxcubecore import HardwareRepository as HWR
+
 
 __credits__ = ["MXCuBE collaboration"]
 __license__ = "LGPLv3+"

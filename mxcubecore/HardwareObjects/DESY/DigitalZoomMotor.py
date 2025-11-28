@@ -1,6 +1,5 @@
-# encoding: utf-8
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -18,33 +17,33 @@
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with MXCuBE. If not, see <http://www.gnu.org/licenses/>.
 
-__copyright__ = """Copyright The MXCuBE Collaboration"""
-__license__ = "LGPLv3+"
+
 __author__ = "Jan Meyer"
 __email__ = "jan.meyer@desy.de"
+__copyright__ = "(c)2016 DESY, FS-PE, P11"
+__license__ = "GPL"
 
 
-from mxcubecore.BaseHardwareObjects import HardwareObject
-from mxcubecore.HardwareObjects.abstract.AbstractMotor import (
-    AbstractMotor,
-    MotorStates,
-)
+import logging
+from mxcubecore.BaseHardwareObjects import Device
+from mxcubecore.HardwareObjects.abstract.AbstractMotor import AbstractMotor
+from mxcubecore.HardwareObjects.abstract.AbstractMotor import MotorStates
 
 
-class DigitalZoomMotor(AbstractMotor, HardwareObject):
+class DigitalZoomMotor(AbstractMotor, Device):
     """
     Works with camera devices which provide
     zoom_exists, set_zoom, get_zoom and get_zoom_min_max
-    <object class="DigitalZoomMotor">
+    <device class="DigitalZoomMotor">
         <username>Zoom</username>
         <actuator_name>Zoom</actuator_name>
         <object href="/mjpg-stream-video" role="camera"/>
-    </object>
+    </device>
     """
 
     def __init__(self, name):
         AbstractMotor.__init__(self, name)
-        super().__init__(name)
+        Device.__init__(self, name)
         self.camera = None
 
     def init(self):
@@ -52,9 +51,7 @@ class DigitalZoomMotor(AbstractMotor, HardwareObject):
         try:
             self.camera = self.get_object_by_role("camera")
         except KeyError:
-            self.log.warning("DigitalZoomMotor: camera not defined")
-
-            self.log.exception("")
+            logging.getLogger("HWR").warning("DigitalZoomMotor: camera not defined")
             return
         try:
             self.read_only = not (self.camera.zoom_exists())
@@ -71,9 +68,11 @@ class DigitalZoomMotor(AbstractMotor, HardwareObject):
             self.update_state(self.STATES.READY)
         else:
             self.update_state(self.STATES.OFF)
-            self.log.warning(
-                "DigitalZoomMotor: digital zoom is not supported by camera object"
+            logging.getLogger("HWR").warning(
+                "DigitalZoomMotor: digital zoom is not supported " "by camera object"
             )
+
+        self.set_is_ready(self.get_state() == MotorStates.READY)
 
     def update_state(self):
         """
@@ -133,6 +132,7 @@ class DigitalZoomMotor(AbstractMotor, HardwareObject):
         """
         Descript. : does nothing, for position change is instantaneous
         """
+        pass
 
     def is_moving(self):
         return False

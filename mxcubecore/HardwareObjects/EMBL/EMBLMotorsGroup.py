@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -22,8 +22,8 @@
 
 [Description]
 The MotorsGroup Hardware Object is used to maintain several motors in one
-group. Motors group is a list of motors which are like a grouped instance
-in tine server (a tuple). It allows to read several motor position,
+group. Motors group is a lsit of motors which are like a grouped instance
+in tine server (a tuple). It allowes to read several motor position,
 statuses,... by one read.
 
 [Channels]
@@ -33,7 +33,7 @@ statuses,... by one read.
 [Commands]
 - implemented as tine.set
 
-[Emitted signals]
+[Emited signals]
 - mGroupPosChanged
 - mGroupFocModeChanged
 - mGroupStatusChanged
@@ -50,7 +50,7 @@ statuses,... by one read.
 
 Example Hardware Object XML file :
 ==================================
-<object class="MotorsGroup">
+<device class="MotorsGroup">
     <username>P14BCU</username>                     - used to identify group
     <serverAddr>/P14/P14BCU</serverAddr>            - tine server address
     <groupAddr>/ShutterTrans</groupAddr>            - motors group address
@@ -66,34 +66,38 @@ Example Hardware Object XML file :
           <velocity>None</velocity>                 - velocity
           <updateTolerance>0.005</updateTolerance>  - absolute update tolerance
           <evalTolerance>0.005</evalTolerance>      - absolute tolerance of
-                                                      beam focus mode evaluation
+					              beam focus mode evaluation
           <statusModes>{'Move': 1, 'Ready': 0}</statusModes>
           <focusingModes>{'Collimated': 0.22, 'Horizontal': 0.22,
           'Vertical': 0.22, 'Double': 0.22}</focusingModes>
         </motor>
     </motors>
-</object>
+</device>
 """
 
+
 import time
+import logging
 
 import gevent
-import tine
 
-from mxcubecore.BaseHardwareObjects import HardwareObject
+import tine
+from mxcubecore.BaseHardwareObjects import Device
+
 
 __credits__ = ["EMBL Hamburg"]
 __license__ = "LGPLv3+"
 __category__ = "Motor"
 
 
-class EMBLMotorsGroup(HardwareObject):
+class EMBLMotorsGroup(Device):
     """
     EMBLMotorsGroup
     """
 
     def __init__(self, name):
-        super().__init__(name)
+
+        Device.__init__(self, name)
         self.server_address = None
         self.group_address = None
         self.motors_list = None
@@ -146,7 +150,7 @@ class EMBLMotorsGroup(HardwareObject):
                 self.group_address,
                 self.positionAddr,
             )
-            self.log.error(msg)
+            logging.getLogger("HWR").error(msg)
 
         try:
             self.chan_status = self.add_channel(
@@ -165,7 +169,7 @@ class EMBLMotorsGroup(HardwareObject):
                 self.group_address,
                 self.statusAddr,
             )
-            self.log.error(msg)
+            logging.getLogger("HWR").error(msg)
 
     def get_motors_dict(self):
         """Returns dict with motors"""
@@ -187,14 +191,16 @@ class EMBLMotorsGroup(HardwareObject):
                     motor["setCmd"],
                     new_position,
                 )
-                self.log.debug(
+                logging.getLogger("HWR").debug(
                     "EMBLMotorsGroup: send %s : %.4f"
                     % (motor["motorAddr"], new_position)
                 )
                 time.sleep(0.2)
                 self.wait_motor_ready(motor_name, timeout=10)
                 time.sleep(1)
-                self.log.debug("EMBLMotorsGroup: motor %s ready" % motor["motorAddr"])
+                logging.getLogger("HWR").debug(
+                    "EMBLMotorsGroup: motor %s ready" % motor["motorAddr"]
+                )
                 break
 
     def set_motor_focus_mode(self, motor_name, focus_mode):
@@ -239,20 +245,21 @@ class EMBLMotorsGroup(HardwareObject):
                 motor["setCmd"] is not None
                 and focus_mode in motor["focusingModes"].keys()
             ):
+
                 motor["status"] = motor["statusModes"]["Move"]
                 tine.set(
                     self.server_address + "/" + motor["motorAddr"],
                     motor["setCmd"],
                     motor["focusingModes"][str(focus_mode)],
                 )
-                self.log.debug(
+                logging.getLogger("HWR").debug(
                     "EMBLMotorsGroup: send %s : %.4f"
                     % (motor["motorAddr"], motor["focusingModes"][str(focus_mode)])
                 )
                 if motor["motorName"] in ("In", "Out", "Top", "But"):
                     self.wait_motor_ready(motor["motorName"], timeout=10)
                     time.sleep(1.1)
-                    self.log.debug(
+                    logging.getLogger("HWR").debug(
                         "EMBLMotorsGroup: motor %s ready" % motor["motorAddr"]
                     )
 
@@ -269,9 +276,9 @@ class EMBLMotorsGroup(HardwareObject):
 
     def positions_changed(self, positions):
         """Called if one or several motors values has been changed.
-        Evaluates if value needs to be updates, if value is
-        changed, then evaluates focusing mode. If necessary
-        pysignals are emitted
+           Evaluates if value needs to be updates, if value is
+           changed, then evaluates focusing mode. If necessary
+           pysignals are emited
         """
         do_emit = False
         # values_to_send = {}
@@ -306,7 +313,7 @@ class EMBLMotorsGroup(HardwareObject):
 
     def status_changed(self, status):
         """Called if motors status is changed. Pysignal with new
-        status has been sent"""
+           status has been sent"""
         for motor in self.motors_list:
             old_status = motor["status"]
             if isinstance(status, (list, tuple)):

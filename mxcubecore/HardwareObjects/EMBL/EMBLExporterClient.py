@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -22,6 +22,7 @@
 
 from mxcubecore.BaseHardwareObjects import HardwareObject
 from mxcubecore.Command import Exporter
+
 
 __credits__ = ["EMBL Hamburg"]
 __license__ = "LGPLv3+"
@@ -50,7 +51,7 @@ class EMBLExporterClient(HardwareObject):
 
     def get_method_list(self):
         """
-        Returns list with available methods
+        Returns lits with available methods
         :return: list
         """
         method_list = []

@@ -1,6 +1,4 @@
 import abc
-from warnings import warn
-
 from mxcubecore.TaskUtils import task
 
 
@@ -8,10 +6,6 @@ class AbstractMCA(object):
     __metaclass__ = abc.ABCMeta
 
     def __init__(self):
-        warn(
-            "AbstractMCA is deprecated. Make an mxcubecore issue if still needed",
-            DeprecationWarning,
-        )
         self.mca = None
         self.calib_cf = []
 
@@ -116,11 +110,11 @@ class AbstractMCA(object):
     def clear_roi(self, **kwargs):
         """Clear ROI settings
 
-        Keyword Args:
-           channel (int): optional output connector channel number (1-8)
+         Keyword Args:
+            channel (int): optional output connector channel number (1-8)
 
-        Returns:
-           None
+         Returns:
+            None
         """
         pass
 

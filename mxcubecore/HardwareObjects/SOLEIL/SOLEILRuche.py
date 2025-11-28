@@ -1,9 +1,8 @@
-import logging
 import os
 import time
-
-from mxcubecore import HardwareRepository as HWR
+import logging
 from mxcubecore.BaseHardwareObjects import HardwareObject
+from mxcubecore import HardwareRepository as HWR
 
 
 class SOLEILRuche(HardwareObject):
@@ -14,6 +13,7 @@ class SOLEILRuche(HardwareObject):
         self.sync_dir = self.get_property("sync_dir")
 
     def trigger_sync(self, path):
+
         try:
             logging.getLogger().info("<SOLEIL Ruche> - trigger_sync path %s." % path)
             logging.getLogger().info(
@@ -27,7 +27,7 @@ class SOLEILRuche(HardwareObject):
             if HWR.beamline.session.user_id is None:
                 return
         except Exception:
-            self.log.exception("")
+            pass
         if os.path.isdir(path):
             path_to_sync = path
         elif os.path.exists(path):

@@ -1,10 +1,11 @@
 from mxcubecore import HardwareRepository as HWR
-from mxcubecore.BaseHardwareObjects import HardwareObject
+from mxcubecore.BaseHardwareObjects import Device
+import logging
 
 
-class ALBAFrontLight(HardwareObject):
+class ALBAFrontLight(Device):
     def __init__(self, *args):
-        super().__init__(*args)
+        Device.__init__(self, *args)
         self.limits = [None, None]
 
         self.state = None
@@ -18,6 +19,7 @@ class ALBAFrontLight(HardwareObject):
         self.off_threshold = None
 
     def init(self):
+
         self.level_channel = self.get_channel_object("light_level")
         self.state_channel = self.get_channel_object("state")
         threshold = self.get_property("off_threshold")
@@ -27,7 +29,7 @@ class ALBAFrontLight(HardwareObject):
                 self.off_threshold = float(threshold)
             except Exception:
                 self.off_threshold = self.default_threshold
-                self.log.info(
+                logging.getLogger("HWR").info(
                     "OFF Threshold for front light is not valid. Using %s"
                     % self.off_threshold
                 )
@@ -93,23 +95,25 @@ class ALBAFrontLight(HardwareObject):
         return self.current_level
 
     def setLevel(self, level):
-        self.log.debug("Setting level in %s to %s" % (self.username, level))
+        logging.getLogger("HWR").debug(
+            "Setting level in %s to %s" % (self.username, level)
+        )
         self.level_channel.set_value(float(level))
 
     def setOn(self):
-        self.log.debug("Setting front light on")
+        logging.getLogger("HWR").debug("Setting front light on")
         if self.memorized_level is not None:
             if self.memorized_level < self.off_threshold:
                 value = self.off_threshold
             else:
                 value = self.memorized_level
-            self.log.debug("   setting value to")
+            logging.getLogger("HWR").debug("   setting value to")
             self.level_channel.set_value(value)
         else:
             self.level_channel.set_value(self.off_threshold)
 
     def setOff(self):
-        self.log.debug("Setting front light off")
+        logging.getLogger("HWR").debug("Setting front light off")
         self.level_channel.set_value(0.0)
 
 

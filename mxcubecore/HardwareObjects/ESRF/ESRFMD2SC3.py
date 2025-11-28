@@ -1,9 +1,8 @@
-"""ESRF SC3 Sample Changer Hardware Object"""
-
-import ESRF.ESRFSC3 as ESRFSC3
-import SC3
-
+"""ESRF SC3 Sample Changer Hardware Object
+"""
 from mxcubecore.TaskUtils import task
+import SC3
+import ESRF.ESRFSC3 as ESRFSC3
 
 
 class Command:

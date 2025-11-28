@@ -1,18 +1,15 @@
-import time
-
+import logging
 import gevent
+import time
 import numpy
 
-from mxcubecore.BaseHardwareObjects import HardwareObject
+from mxcubecore.BaseHardwareObjects import Equipment
 from mxcubecore.TaskUtils import cleanup
 
 SCAN_LENGTH = 500
 
 
-class XRFMockup(HardwareObject):
-    def __init__(self, name):
-        super().__init__(name)
-
+class XRFMockup(Equipment):
     def init(self):
         self.ready_event = gevent.event.Event()
         self.spectrumInfo = {}
@@ -22,7 +19,7 @@ class XRFMockup(HardwareObject):
         self.spectrumInfo["beamSizeHorizontal"] = 0
         self.spectrumInfo["beamSizeVertical"] = 0
         self.ready_event = gevent.event.Event()
-        self.__scan_data = {}
+        self.__scan_data = dict()
 
         # self.plottin_hwobj = self.get_object_by_role('plotting')
 
@@ -47,7 +44,7 @@ class XRFMockup(HardwareObject):
         )
         raw_data = s1 + s2
 
-        self.log.info("XRF Spectrum Started, task id: %d" % blsample_id)
+        logging.getLogger("HWR").info("XRF Spectrum Started, task id: %d" % blsample_id)
         self.scanning = True
         self.emit("xrfSpectrumStarted", ())
         with cleanup(self.ready_event.set):
@@ -62,7 +59,7 @@ class XRFMockup(HardwareObject):
                 "labels": ["energy", "diode value"],
             }
             scan_id = scan_info["scan_nb"]
-            self.__scan_data[scan_id] = []
+            self.__scan_data[scan_id] = list()
 
             self.emit(
                 "new_plot",
@@ -84,7 +81,9 @@ class XRFMockup(HardwareObject):
                     self.emit("plot_data", {"id": scan_id, "data": aux})
                     if divmod(i, SCAN_LENGTH / 10)[1] == 0:
                         progress = i / float(SCAN_LENGTH)
-                        self.log.info("XRF Spectrum Progress %f" % progress)
+                        logging.getLogger("HWR").info(
+                            "XRF Spectrum Progress %f" % progress
+                        )
                         self.emit("xrf_task_progress", (blsample_id, progress))
 
                     gevent.sleep(0.02)
@@ -112,5 +111,5 @@ class XRFMockup(HardwareObject):
                 res.append(arr[0].tolist())
 
             self.emit("xrfSpectrumFinished", (res, mcaCalib, mcaConfig))
-            self.log.info("XRF Spectrum Finished")
+            logging.getLogger("HWR").info("XRF Spectrum Finished")
             del self.__scan_data[scan_id]

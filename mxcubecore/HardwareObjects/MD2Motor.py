@@ -1,11 +1,6 @@
 import logging
+from gevent import Timeout, sleep
 from warnings import warn
-
-from gevent import (
-    Timeout,
-    sleep,
-)
-
 from mxcubecore.HardwareObjects.abstract.AbstractMotor import (
     AbstractMotor,
     MotorStates,
@@ -89,7 +84,9 @@ class MD2Motor(AbstractMotor):
 
     def motorStateChanged(self, state):
         logging.getLogger().debug(
-            "{}: in motorStateChanged: motor state changed to {}".format(self.id, state)
+            "{}: in motorStateChanged: motor state changed to {}".format(
+                self.name(), state
+            )
         )
         self.emit("stateChanged", (state,))
 

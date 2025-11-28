@@ -1,15 +1,16 @@
+# pylint: skip-file
+
 import time
-
-from PyTango import DeviceProxy
-
-from mxcubecore import HardwareRepository as HWR
 from mxcubecore.TaskUtils import task
+import logging
+from PyTango import DeviceProxy
+from mxcubecore import HardwareRepository as HWR
 
 
 class LimaDetectorMockup:
     def init(self, config, collect_obj=None):
         self.config = config
-        self.header = {}
+        self.header = dict()
 
         lima_device = config.get_property("lima_device")
         pilatus_device = config.get_property("pilatus_device")
@@ -101,7 +102,7 @@ class LimaDetectorMockup:
         still,
     ):
         diffractometer_positions = HWR.beamline.diffractometer.get_positions()
-        self.start_angles = []
+        self.start_angles = list()
         for i in range(number_of_images):
             self.start_angles.append("%0.4f deg." % (start + osc_range * i))
         kappa_phi = diffractometer_positions.get("kappa_phi", -9999)
@@ -122,7 +123,7 @@ class LimaDetectorMockup:
 
     @task
     def start_acquisition(self):
-        self.log.info("Mockup detector starts acquisition")
+        logging.getLogger("HWR").info("Mockup detector starts acquisition")
         return
 
     def stop(self):

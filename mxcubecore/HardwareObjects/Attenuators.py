@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -18,6 +18,7 @@
 #  along with MXCuBE. If not, see <http://www.gnu.org/licenses/>.
 
 
+import gevent
 from mxcubecore.HardwareObjects.abstract.AbstractTransmission import (
     AbstractTransmission,
 )

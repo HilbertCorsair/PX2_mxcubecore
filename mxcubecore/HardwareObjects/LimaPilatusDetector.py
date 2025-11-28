@@ -1,22 +1,26 @@
-import os
-import subprocess
-import time
-
 import gevent
-from PyTango import DeviceProxy
+import time
+import subprocess
+import os
+import logging
 
-from mxcubecore import HardwareRepository as HWR
-from mxcubecore.BaseHardwareObjects import HardwareObjectState
-from mxcubecore.CommandContainer import ConnectionError
-from mxcubecore.HardwareObjects.abstract.AbstractDetector import AbstractDetector
+from PyTango import DeviceProxy
 from mxcubecore.TaskUtils import task
+from mxcubecore import HardwareRepository as HWR
+from mxcubecore.CommandContainer import ConnectionError
+
+from mxcubecore.HardwareObjects.abstract.AbstractDetector import (
+    AbstractDetector
+)
+
+from mxcubecore.BaseHardwareObjects import HardwareObjectState
 
 
 class LimaPilatusDetector(AbstractDetector):
     def __init__(self, name):
         AbstractDetector.__init__(self, name)
-        self.header = {}
-        self.start_angles = []
+        self.header = dict()
+        self.start_angles = list()
 
     def init(self):
         AbstractDetector.init(self)
@@ -106,12 +110,14 @@ class LimaPilatusDetector(AbstractDetector):
                 "update", self.roi_mode_changed
             )
 
-            self.get_command_object("prepare_acq").set_device_timeout(10000)
+            self.get_command_object("prepare_acq").setDeviceTimeout(10000)
             self._emit_status()
 
         except ConnectionError:
             self.update_state(HardwareObjectState.FAULT)
-            self.log.error("Could not connect to detector %s" % lima_device)
+            logging.getLogger("HWR").error(
+                "Could not connect to detector %s" % lima_device
+            )
             self._emit_status()
 
     def has_shutterless(self):
@@ -137,6 +143,14 @@ class LimaPilatusDetector(AbstractDetector):
         self.roi_mode = self.roi_modes_list.index(str(mode))
         self.emit("detectorRoiModeChanged", (self.roi_mode,))
 
+    def set_roi_mode(self, mode):
+        """Sets roi mode
+
+        :param mode: roi mode
+        :type mode: str
+        """
+        # self.chan_roi_mode.set_value(self.roi_modes_list[mode])
+
     def prepare_acquisition(
         self,
         take_dark,
@@ -150,15 +164,16 @@ class LimaPilatusDetector(AbstractDetector):
         mesh_num_lines,
     ):
         if mesh:
-            trigger_mode = self.get_property("mesh_trigger_mode", "EXTERNAL_GATE")
+            trigger_mode = "EXTERNAL_GATE"
+        elif osc_range < 1e-4:
+            trigger_mode = "INTERNAL_TRIGGER"
         else:
-            trigger_mode = self.get_property("osc_trigger_mode", "EXTERNAL_GATE")
+            trigger_mode = "EXTERNAL_TRIGGER"
 
         diffractometer_positions = HWR.beamline.diffractometer.get_positions()
-        self.start_angles = []
+        self.start_angles = list()
         for i in range(number_of_images):
             self.start_angles.append("%0.4f deg." % (start + osc_range * i))
-        self.header = {}
         self.header["file_comments"] = comment
         self.header["N_oscillations"] = number_of_images
         self.header["Oscillation_axis"] = "omega"
@@ -178,7 +193,9 @@ class LimaPilatusDetector(AbstractDetector):
         self.header["Transmission"] = HWR.beamline.transmission.get_value()
 
         self.header["Flux"] = HWR.beamline.flux.get_value()
-        self.header["Beam_xy"] = "(%.2f, %.2f) pixels" % self.get_beam_position()
+        self.header["Beam_xy"] = "(%.2f, %.2f) pixels" % tuple(
+            [value / 0.172 for value in HWR.beamline.detector.get_beam_position()]
+        )
         self.header["Detector_Voffset"] = "0.0000 m"
         self.header["Energy_range"] = "(0, 0) eV"
         self.header["Detector_distance"] = "%f m" % (self.distance.get_value() / 1000.0)
@@ -200,7 +217,7 @@ class LimaPilatusDetector(AbstractDetector):
 
         self.set_channel_value("acq_trigger_mode", trigger_mode)
 
-        if self.get_property("set_latency_time", False):
+        if self.get_property("set_latency_time",  False):
             self.set_channel_value("latency_time", self.get_deadtime())
 
         self.set_channel_value("saving_mode", "AUTO_FRAME")
@@ -215,14 +232,14 @@ class LimaPilatusDetector(AbstractDetector):
         """
         minE = self.get_property("minE")
         # some versions of Lima Pilatus server take the energy ergument in keV
-        # some in eV. From minE we can set a conversion factor.
-        factor = 1000 if minE > 100 else 1.0
+        # some in eV. From minE we can set a convertion factor.
+        factor = 1000 if minE > 100 else 1.
 
         energy_threshold = self.get_channel_value("energy_threshold")
 
         # check if need to convert energy in eV.
         if energy < 100:
-            energy *= factor
+             energy *= factor
 
         if energy < minE:
             energy = minE
@@ -242,7 +259,7 @@ class LimaPilatusDetector(AbstractDetector):
         if dirname.startswith(os.path.sep):
             dirname = dirname[len(os.path.sep) :]
 
-        saving_directory = os.path.join(self.get_property("buffer", "/"), dirname)
+        saving_directory = os.path.join(self.get_property("buffer"), dirname)
 
         subprocess.Popen(
             "ssh %s@%s mkdir --parents %s"
@@ -262,7 +279,7 @@ class LimaPilatusDetector(AbstractDetector):
         self.set_channel_value("saving_format", "CBF")
         self.set_channel_value("saving_header_delimiter", ["|", ";", ":"])
 
-        headers = []
+        headers = list()
 
         for i, start_angle in enumerate(self.start_angles):
             header = "\n%s\n" % self.get_property("serial")
@@ -276,13 +293,18 @@ class LimaPilatusDetector(AbstractDetector):
 
             headers.append("%d : array_data/header_contents|%s;" % (i, header))
 
-        self.header = headers
+        self.execute_command("set_image_header", headers)
 
     def start_acquisition(self):
+        try:
+            HWR.beamline.collect.get_object_by_role("detector_cover").set_out()
+        except Exception:
+            pass
+
         self.wait_ready()
+
         self.execute_command("stop_acq")
         self.execute_command("prepare_acq")
-        self.execute_command("set_image_header", self.header)
         self.execute_command("start_acq")
         self._emit_status()
 
@@ -328,7 +350,7 @@ class LimaPilatusDetector(AbstractDetector):
             1,
             "",
             HWR.beamline.energy.get_value(),
-            "INTERNAL_TRIGGER",
+            "INTERNAL_TRIGGER"
         )
         self.start_acquisition()
         self.wait_ready()

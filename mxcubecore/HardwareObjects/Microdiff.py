@@ -1,30 +1,12 @@
 import logging
 import math
 import time
-
+from mxcubecore.HardwareObjects import MiniDiff
 import gevent
-
+from mxcubecore.HardwareObjects import sample_centring
 from mxcubecore import HardwareRepository as HWR
-from mxcubecore.BaseHardwareObjects import (
-    HardwareObject,
-    HardwareObjectState,
-)
-from mxcubecore.HardwareObjects import (
-    MiniDiff,
-    sample_centring,
-)
 
 MICRODIFF = None
-
-EXPORTER_TO_HWOBJ_STATE = {
-    "Fault": HardwareObjectState.FAULT,
-    "Ready": HardwareObjectState.READY,
-    "Running": HardwareObjectState.BUSY,
-    "Moving": HardwareObjectState.BUSY,
-    "Busy": HardwareObjectState.BUSY,
-    "Unknown": HardwareObjectState.BUSY,
-    "Offline": HardwareObjectState.OFF,
-}
 
 
 class Microdiff(MiniDiff.MiniDiff):
@@ -33,8 +15,6 @@ class Microdiff(MiniDiff.MiniDiff):
         MICRODIFF = self
         self.phiMotor = self.get_object_by_role("phi")
         self.exporter_addr = self.get_property("exporter_address")
-
-        self.update_state(HardwareObjectState.READY)
 
         self.x_calib = self.add_channel(
             {
@@ -82,7 +62,7 @@ class Microdiff(MiniDiff.MiniDiff):
             "DataCollection": 3,
             "Transfer": 4,
         }
-        self.move_phase = self.add_command(
+        self.movePhase = self.add_command(
             {
                 "type": "exporter",
                 "exporter_address": self.exporter_addr,
@@ -98,16 +78,6 @@ class Microdiff(MiniDiff.MiniDiff):
             },
             "CurrentPhase",
         )
-
-        self.state = self.add_channel(
-            {
-                "type": "exporter",
-                "exporter_address": self.exporter_addr,
-                "name": "state",
-            },
-            "State",
-        )
-
         self.scanLimits = self.add_command(
             {
                 "type": "exporter",
@@ -218,90 +188,9 @@ class Microdiff(MiniDiff.MiniDiff):
             {
                 "type": "exporter",
                 "exporter_address": self.exporter_addr,
-                "name": "save_centring_positions",
+                "name": "abort",
             },
             "saveCentringPositions",
-        )
-
-        self.set_room_temperature_mode = self.add_command(
-            {
-                "type": "exporter",
-                "exporter_address": self.exporter_addr,
-                "name": "set_room_temperature_mode",
-            },
-            "setRoomTemperatureMode",
-        )
-
-        self.prepare_ssx_grid_scan = self.add_command(
-            {
-                "type": "exporter",
-                "exporter_address": self.exporter_addr,
-                "name": "prepare_ssx_grid_scan",
-            },
-            "prepareSSXGridScan",
-        )
-
-        self.start_ssx_scan = self.add_command(
-            {
-                "type": "exporter",
-                "exporter_address": self.exporter_addr,
-                "name": "start_ssx_scan",
-            },
-            "startSSXGridScan",
-        )
-
-        self.start_still_ssx_scan = self.add_command(
-            {
-                "type": "exporter",
-                "exporter_address": self.exporter_addr,
-                "name": "start_still_ssx_scan",
-            },
-            "startSSXStillScan",
-        )
-
-        self.prepare_ssx_grid_scan = self.add_command(
-            {
-                "type": "exporter",
-                "exporter_address": self.exporter_addr,
-                "name": "prepare_ssx_grid_scan",
-            },
-            "prepareSSXGridScan",
-        )
-
-        self.get_ssx_scan_method = self.add_command(
-            {
-                "type": "exporter",
-                "exporter_address": self.exporter_addr,
-                "name": "get_ssx_scan_method",
-            },
-            "getSSXScanMethod",
-        )
-
-        self.get_ssx_delay = self.add_command(
-            {
-                "type": "exporter",
-                "exporter_address": self.exporter_addr,
-                "name": "get_ssx_delay",
-            },
-            "getSSXDeltaT",
-        )
-
-        self.prepare_ssx_line_scan = self.add_command(
-            {
-                "type": "exporter",
-                "exporter_address": self.exporter_addr,
-                "name": "prepare_ssx_line_scan",
-            },
-            "prepareSSXLineScan",
-        )
-
-        self.start_ssx_line_scan = self.add_command(
-            {
-                "type": "exporter",
-                "exporter_address": self.exporter_addr,
-                "name": "start_ssx_line_scan",
-            },
-            "startSSXLineScan",
         )
 
         MiniDiff.MiniDiff.init(self)
@@ -312,37 +201,17 @@ class Microdiff(MiniDiff.MiniDiff):
         self.centringVertical = self.get_object_by_role("centringVertical")
         self.centringFocus = self.get_object_by_role("centringFocus")
 
-        self.saved_motor_position = {}
-
         self.frontLight = self.get_object_by_role("FrontLight")
         self.backLight = self.get_object_by_role("BackLight")
 
         self.wait_ready = self._wait_ready
         self.pixelsPerMmY, self.pixelsPerMmZ = self.getCalibrationData(None)
 
-        self.readPhase.connect_signal("update", self._update_value)
-        self.state.connect_signal("update", self._update_state)
-
-        HardwareObject.init(self)
-        self.handle_detector_cover = self.get_object_by_role("handle_detcover")
-
-    def _update_value(self, value=None):
-        if value is None:
-            value = self.get_current_phase()
-        self.emit("phaseChanged", (value))
-
-    def _update_state(self, value):
-        self.update_state(
-            EXPORTER_TO_HWOBJ_STATE.get(value, HardwareObjectState.UNKNOWN)
-        )
-
-    def abort(self):
-        self.abort_cmd()
-        return True
-
     def getMotorToExporterNames(self):
         MOTOR_TO_EXPORTER_NAME = {
             "focus": self.focusMotor.get_property("actuator_name"),
+            "kappa": self.kappaMotor.get_property("actuator_name"),
+            "kappa_phi": self.kappaPhiMotor.get_property("actuator_name"),
             "phi": self.phiMotor.get_property("actuator_name"),
             "phiy": self.phiyMotor.get_property("actuator_name"),
             "phiz": self.phizMotor.get_property("actuator_name"),
@@ -350,25 +219,7 @@ class Microdiff(MiniDiff.MiniDiff):
             "sampy": self.sampleYMotor.get_property("actuator_name"),
             "zoom": "Zoom",
         }
-        if self.in_kappa_mode():
-            MOTOR_TO_EXPORTER_NAME.update(
-                {"kappa": self.kappaMotor.get_property("actuator_name")}
-            )
-            MOTOR_TO_EXPORTER_NAME.update(
-                {"kappa_phi": self.kappaPhiMotor.get_property("actuator_name")}
-            )
-
         return MOTOR_TO_EXPORTER_NAME
-
-    def save_current_motor_position(self):
-        motor_pos_dict = {
-            "focus": self.focusMotor.get_value(),
-            "phiy": self.phiyMotor.get_value(),
-            "phiz": self.phizMotor.get_value(),
-            "centring_focus": self.centringFocus.get_value(),
-            "centring_vertical": self.centringVertical.get_value(),
-        }
-        self.saved_motor_position = motor_pos_dict
 
     def getCalibrationData(self, offset):
         return (1.0 / self.x_calib.get_value(), 1.0 / self.y_calib.get_value())
@@ -376,6 +227,9 @@ class Microdiff(MiniDiff.MiniDiff):
     def emitCentringSuccessful(self):
         # check first if all the motors have stopped
         self._wait_ready(30)
+
+        # save position in MD2 software
+        self.save_centring_positions()
 
         # do normal stuff
         return MiniDiff.MiniDiff.emitCentringSuccessful(self)
@@ -396,105 +250,45 @@ class Microdiff(MiniDiff.MiniDiff):
         # None means infinite timeout
         # <=0 means default timeout
         if timeout is not None and timeout <= 0:
-            self.log.warning("DEBUG: Strange timeout value passed %s" % str(timeout))
-            timeout = 30
+            timeout = self.timeout
         with gevent.Timeout(
             timeout, RuntimeError("Timeout waiting for diffractometer to be ready")
         ):
             while not self._ready():
                 time.sleep(0.5)
 
-    def open_detector_cover(self, timeout=10):
-        use = True
-        if self.handle_detector_cover:
-            try:
-                use = self.handle_detector_cover.get_value().value
-            except AttributeError:
-                use = False
+    def open_detector_cover(self):
+        try:
+            detcover = self.getObjectByRole("controller").detcover
 
-        logging.getLogger("user_level_log").info("Use detector cover open: %s" % use)
+            if detcover.state == "IN":
+                detcover.set_out(10)
+        except:
+            logging.getLogger("HWR").exception("")
 
-        if use:
-            try:
-                detcover = self.get_object_by_role("controller").detcover
+    def close_detector_cover(self):
+        try:
+            detcover = self.getObjectByRole("controller").detcover
 
-                if detcover.state == "IN":
-                    detcover.set_out(timeout)
-            except AttributeError:
-                logging.getLogger("user_level_log").exception(
-                    "No detector cover configured"
-                )
-
-    def close_detector_cover(self, timeout=10):
-        use = True
-        if self.handle_detector_cover:
-            try:
-                use = self.handle_detector_cover.get_value().value
-            except AttributeError:
-                use = False
-
-        logging.getLogger("user_level_log").info("Use detector cover close: %s" % use)
-
-        if use:
-            try:
-                detcover = self.get_object_by_role("controller").detcover
-
-                if detcover.state == "OUT":
-                    detcover.set_in(timeout)
-            except AttributeError:
-                logging.getLogger("user_level_log").exception(
-                    "No detector cover configured"
-                )
-
-    def phase_prepare(self, phase):
-        if phase == "Centring":
-            try:
-                diffr = self.get_object_by_role("controller").diffractometer
-                diffr.prepare("centre")
-            except Exception:
-                self.log.exception("Cannot prepare centring")
-
-    def set_light_in(self):
-        """Set the backlight in - used by the XMLRPC calls"""
-        self.log.info("Moving backlight in")
-        light_hwobj = self.get_object_by_role("BackLightSwitch")
-        light_hwobj.set_value(light_hwobj.VALUES.IN)
-        self._wait_ready(20)
-
-    def set_light_out(self):
-        """Set the backlight out - used by the XMLRPC calls"""
-        self.log.info("Moving backlight out")
-        light_hwobj = self.get_object_by_role("BackLightSwitch")
-        light_hwobj.set_value(light_hwobj.VALUES.OUT)
-        self._wait_ready(20)
+            if detcover.state == "OUT":
+                detcover.set_in(10)
+        except:
+            logging.getLogger("HWR").exception("")
 
     def set_phase(self, phase, wait=False, timeout=None):
-        """Set the phase"""
-        _use_custom = self.get_property("use_custom_phase_script", False)
-        if not self._ready():
-            self.log.exception("MD not ready - phase not set.")
-            return
+        if self._ready():
+            if phase in self.phases:
 
-        current_phase = self.get_current_phase()
-        msg = f"Current phase is {current_phase} and moving to {phase}"
-        logging.getLogger("user_level_log").info(msg)
+                if phase in ["BeamLocation", "Transfer", "Centring"]:
+                    self.close_detector_cover()
 
-        if phase in self.phases:
-            if phase in ["BeamLocation", "Transfer"]:
-                self.close_detector_cover()
-            self.phase_prepare(phase)
-
-            if _use_custom and not self.in_plate_mode():
-                script = "ChangePhase_" + phase.lower()
-                msg = f"Changing phase to {phase}, using pmac script"
-                logging.getLogger("user_level_log").info(msg)
-                self.run_script(script)
-                self._wait_ready(600)
-            else:
-                self.move_phase(phase)
-            if wait:
-                timeout = timeout or 40
-                self._wait_ready(timeout)
+                self.movePhase(phase)
+                if wait:
+                    if not timeout:
+                        timeout = 40
+                    self._wait_ready(timeout)
+        else:
+            print("moveToPhase - Ready is: ", self._ready())
 
     def get_current_phase(self):
         return self.readPhase.get_value()
@@ -512,11 +306,9 @@ class Microdiff(MiniDiff.MiniDiff):
             position = motors_dict[motor]
             if position is None:
                 continue
-
+            name = self.MOTOR_TO_EXPORTER_NAME[motor]
             if not in_kappa_mode and motor in ("kappa", "kappa_phi"):
                 continue
-
-            name = self.MOTOR_TO_EXPORTER_NAME[motor]
             argin += "%s=%0.3f;" % (name, position)
         if not argin:
             return
@@ -528,25 +320,16 @@ class Microdiff(MiniDiff.MiniDiff):
             self._wait_ready()
         # print "end moving motors =============", time.time()
 
-    def oscilScan(self, start, end, exptime, number_of_images, wait=False):
+    def oscilScan(self, start, end, exptime, wait=False):
         if self.in_plate_mode():
             scan_speed = math.fabs(end - start) / exptime
             low_lim, hi_lim = map(float, self.scanLimits(scan_speed))
             if start < low_lim:
                 raise ValueError("Scan start below the allowed value %f" % low_lim)
             elif end > hi_lim:
-                raise ValueError("Scan end above the allowed value %f" % hi_lim)
+                raise ValueError("Scan end abobe the allowed value %f" % hi_lim)
 
-        dead_time = HWR.beamline.detector.get_deadtime()
-
-        self.scan_detector_gate_pulse_enabled.set_value(True)
-        self.scan_detector_gate_pulse_readout_time.set_value(dead_time * 1000)
-
-        if self.get_property("md_set_number_of_frames", False):
-            self.nb_frames.set_value(number_of_images)
-        else:
-            self.nb_frames.set_value(1)
-
+        self.nb_frames.set_value(1)
         scan_params = "1\t%0.3f\t%0.3f\t%0.4f\t1" % (start, (end - start), exptime)
         scan = self.add_command(
             {
@@ -559,24 +342,20 @@ class Microdiff(MiniDiff.MiniDiff):
         scan(scan_params)
         print("oscil scan started at ----------->", time.time())
         if wait:
-            self._wait_ready(40 * 60)  # Timeout of 40 min
+            self._wait_ready(
+                600
+            )  # timeout of 10 min # Changed on 20180406 Daniele, because of long exposure time set by users
+            print("finished at ---------->", time.time())
 
-    def oscilScan4d(
-        self, start, end, exptime, number_of_images, motors_pos, wait=False
-    ):
+    def oscilScan4d(self, start, end, exptime, motors_pos, wait=False):
         if self.in_plate_mode():
             scan_speed = math.fabs(end - start) / exptime
             low_lim, hi_lim = map(float, self.scanLimits(scan_speed))
             if start < low_lim:
                 raise ValueError("Scan start below the allowed value %f" % low_lim)
             elif end > hi_lim:
-                raise ValueError("Scan end above the allowed value %f" % hi_lim)
-
-        if self.get_property("md_set_number_of_frames", False):
-            self.nb_frames.set_value(number_of_images)
-        else:
-            self.nb_frames.set_value(1)
-
+                raise ValueError("Scan end abobe the allowed value %f" % hi_lim)
+        self.nb_frames.set_value(1)
         scan_params = "%0.3f\t%0.3f\t%f\t" % (start, (end - start), exptime)
         scan_params += "%0.3f\t" % motors_pos["1"]["phiy"]
         scan_params += "%0.3f\t" % motors_pos["1"]["phiz"]
@@ -600,7 +379,7 @@ class Microdiff(MiniDiff.MiniDiff):
 
         print("helical scan started at ----------->", time.time())
         if wait:
-            self._wait_ready(20 * 60)  # timeout of 15 min
+            self._wait_ready(900)  # timeout of 15 min
             print("finished at ---------->", time.time())
 
     def oscilScanMesh(
@@ -616,8 +395,15 @@ class Microdiff(MiniDiff.MiniDiff):
         wait=False,
     ):
         self.scan_detector_gate_pulse_enabled.set_value(True)
-        dead_time = HWR.beamline.detector.get_deadtime()
-        self.scan_detector_gate_pulse_readout_time.set_value(dead_time * 1000)
+
+        # Adding the servo time to the readout time to avoid any
+        # servo cycle jitter
+        servo_time = 0.110
+
+        self.scan_detector_gate_pulse_readout_time.set_value(
+            dead_time * 1000 + servo_time
+        )
+
         self.move_motors(mesh_center.as_dict())
         positions = self.get_positions()
 
@@ -631,7 +417,7 @@ class Microdiff(MiniDiff.MiniDiff):
         params += "%0.3f\t" % positions["sampy"]
         params += "%d\t" % mesh_num_lines
         params += "%d\t" % (mesh_total_nb_frames / mesh_num_lines)
-        params += "%0.6f\t" % (exptime / mesh_num_lines)
+        params += "%0.3f\t" % (exptime / mesh_num_lines)
         params += "%r\t" % True
         params += "%r\t" % True
         params += "%r\t" % self.get_property("use_fast_mesh", True)
@@ -645,7 +431,7 @@ class Microdiff(MiniDiff.MiniDiff):
             "startRasterScanEx",
         )
 
-        self._wait_ready(900)  # timeout of 30 min
+        self._wait_ready(900)  # timeout of 15 min
 
         scan(params)
 
@@ -669,51 +455,6 @@ class Microdiff(MiniDiff.MiniDiff):
             self._wait_ready(1800)  # timeout of 30 min
             print("finished at ---------->", time.time())
 
-    def characterisation_scan(
-        self,
-        start,
-        scan_range,
-        nb_frames,
-        exptime,
-        nb_scans,
-        angle,
-        wait=False,
-    ):
-        """Do N scans continuously.
-        Args:
-            start (float): Position of omega for the first scan [deg].
-            scan_range (float): range for each scan [deg].
-            nb_frames (int): Frame numbers for each scan.
-            exptime (float): Total exposure time for each scan [s].
-            nb_scans (int): How many times a scan to be repeated.
-            angle (float): The angle between each scan [deg]. This number,
-                           added to the last position of each scan and will
-                           be the start position of the consequent scan.
-            wait (bool); Wait (True) or no (False) the end of the command.
-        """
-
-        if self.in_plate_mode():
-            # to see if needed when plates
-            return
-        scan_params = "%d\t%0.3f\t%0.3f\t" % (nb_frames, start, scan_range)
-        scan_params += "%0.3f\t%d\t%0.3f" % (exptime, nb_scans, angle)
-
-        scan = self.add_command(
-            {
-                "type": "exporter",
-                "exporter_address": self.exporter_addr,
-                "name": "characterisation_scan",
-            },
-            "startCharacterisationScanEx",
-        )
-
-        scan(scan_params)
-
-        print("characterisation scan started at ----------->", time.time())
-        if wait:
-            self._wait_ready(20 * 60)  # timeout of 15 min
-            print("finished at ---------->", time.time())
-
     def in_plate_mode(self):
         try:
             return self.head_type.get_value() == "Plate"
@@ -725,20 +466,6 @@ class Microdiff(MiniDiff.MiniDiff):
             self.head_type.get_value() == "MiniKappa" and self.kappa_channel.get_value()
         )
 
-    def get_motors(self):
-        """Get motor_name:Motor dictionary"""
-        return {
-            "phi": self.phiMotor,
-            "focus": self.focusMotor,
-            "phiy": self.phiyMotor,
-            "phiz": self.phizMotor,
-            "sampx": self.sampleXMotor,
-            "sampy": self.sampleYMotor,
-            "zoom": self.zoomMotor,
-            "kappa": self.kappaMotor if self.in_kappa_mode() else None,
-            "kappa_phi": self.kappaPhiMotor if self.in_kappa_mode() else None,
-        }
-
     def get_positions(self):
         pos = {
             "phi": float(self.phiMotor.get_value()),
@@ -748,12 +475,12 @@ class Microdiff(MiniDiff.MiniDiff):
             "sampx": float(self.sampleXMotor.get_value()),
             "sampy": float(self.sampleYMotor.get_value()),
             "zoom": self.zoomMotor.get_value().value,
-            "kappa": (
-                float(self.kappaMotor.get_value()) if self.in_kappa_mode() else None
-            ),
-            "kappa_phi": (
-                float(self.kappaPhiMotor.get_value()) if self.in_kappa_mode() else None
-            ),
+            "kappa": float(self.kappaMotor.get_value())
+            if self.in_kappa_mode()
+            else None,
+            "kappa_phi": float(self.kappaPhiMotor.get_value())
+            if self.in_kappa_mode()
+            else None,
         }
         return pos
 
@@ -788,7 +515,7 @@ class Microdiff(MiniDiff.MiniDiff):
 
         beam_pos_x, beam_pos_y = HWR.beamline.beam.get_beam_position_on_screen()
 
-        self.log.info("Starting centring procedure ...")
+        logging.getLogger("HWR").info("Starting centring procedure ...")
 
         if self.in_plate_mode():
             plateTranslation = self.get_object_by_role("plateTranslation")
@@ -801,6 +528,7 @@ class Microdiff(MiniDiff.MiniDiff):
                 "setPlateVertical",
             )
             low_lim, high_lim = self.phiMotor.get_dynamic_limits()
+            phi_range = math.fabs(high_lim - low_lim - 1)
             self.current_centring_procedure = sample_centring.start_plate_1_click(
                 {
                     "phi": self.centringPhi,
@@ -837,35 +565,13 @@ class Microdiff(MiniDiff.MiniDiff):
         self.current_centring_procedure.link(self.manualCentringDone)
 
     def interrupt_and_accept_centring(self):
-        """Used when plate. Kills the current 1 click centring infinite loop
+        """ Used when plate. Kills the current 1 click centring infinite loop
         and accepts fake centring - only save the motor positions
         """
         self.current_centring_procedure.kill()
         self.do_centring = False
         self.start_centring_method(self, self.MANUAL3CLICK_MODE)
         self.do_centring = True
-
-    def start_harvester_centring(self, computed_offset: tuple[float]):
-        """used when Pin from Harvester"""
-
-        phiy_offset, centringFocus, centringTableVertical = computed_offset
-
-        motor_pos_dict = {
-            "kappa": float(
-                self["HacentringReferencePosition"].get_property("kappa_ref")
-            ),
-            "kappa_phi": float(
-                self["HacentringReferencePosition"].get_property("phi_ref")
-            ),
-            "phi": float(self["HacentringReferencePosition"].get_property("omega_ref")),
-            "phiy": self.phiyMotor.get_value() + phiy_offset,
-        }
-
-        self.move_motors(motor_pos_dict)
-
-        self.centringFocus.set_value_relative(centringFocus, None)
-
-        self.centringVertical.set_value_relative(centringTableVertical, None)
 
     def getFrontLightLevel(self):
         return self.frontLight.get_value()
@@ -884,6 +590,14 @@ class Microdiff(MiniDiff.MiniDiff):
             self.beam_position_horizontal.get_value(),
             self.beam_position_vertical.get_value(),
         )
+
+
+def set_light_in(light, light_motor, zoom):
+    self.frontlight.set_value(0)
+    MICRODIFF.get_object_by_role("BackLightSwitch").actuatorIn()
+
+
+MiniDiff.set_light_in = set_light_in
 
 
 def to_float(d):

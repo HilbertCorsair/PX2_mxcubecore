@@ -17,7 +17,7 @@
 #
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with MXCuBE. If not, see <http://www.gnu.org/licenses/>.
-
+#
 """Gives access to the Hardware Objects contained in the Hardware Repository database
 
 The Hardware Repository database is a set of XML files describing devices, equipment
@@ -83,7 +83,7 @@ beamline = None
 # Supported beamline configuration filenames.
 # The first name in the list takes precedence.
 #
-BEAMLINE_CONFIG_FILES = ["beamline.yaml", "beamline_config.yml"]
+BEAMLINE_CONFIG_FILES = ["beamline.yaml", "beamline_config.yaml"]
 
 
 def load_from_yaml(
@@ -104,6 +104,7 @@ def load_from_yaml(
     Returns:
 
     """
+
     global beamline
 
     column_names = ("role", "Class", "file", "Time (ms)", "Comment")
@@ -122,12 +123,14 @@ def load_from_yaml(
     configuration_path = _instance.find_in_repository(configuration_file)
     if configuration_path is None:
         msg0 = "File not found"
-
     if not msg0:
         # Load the configuration file
         with open(configuration_path, "r") as fp0:
             configuration = yaml.load(fp0)
         class_import = configuration.pop("class", None)
+
+        #class_import = 'mxcubecore.HardwareObjects.Beamline.Beamline'
+
         if not class_import:
             if _container:
                 msg0 = "No 'class' tag"
@@ -139,7 +142,7 @@ def load_from_yaml(
         module_name, class_name = class_import.rsplit(".", 1)
         # For "a.b.c" equivalent to absolute import of "from a.b import c"
         try:
-            cls = getattr(importlib.import_module(module_name), class_name)
+            cls = getattr(importlib.import_module(module_name),class_name)
         except Exception as ex:
             if _container:
                 msg0 = "Error importing class"
@@ -178,7 +181,7 @@ def load_from_yaml(
             result._config = result.HOConfig(**config)
 
             # Initialise object
-            result._init()
+            result.init()
         except Exception:
             if _container:
                 msg0 = "Error in %s._init()" % cls.__name__
@@ -399,7 +402,9 @@ def init_hardware_repository(
     _instance = __HardwareRepositoryClient(configuration_path)
     _instance.connect()
 
+
     beamline_config_file = _instance.find_beamline_config_file()
+
     if beamline_config_file.endswith(".yml"):
         warn(  # noqa: B028 we don't care about stacklevel for this warning
             f"Config file '{beamline_config_file}' have deprecated extension 'yml', "
@@ -475,6 +480,7 @@ class __HardwareRepositoryClient:
         Returns:
             The found config file name, or None if not found.
         """
+
         for file_name in BEAMLINE_CONFIG_FILES:
             file = self.find_in_repository(file_name)
             if file is not None:
@@ -483,6 +489,7 @@ class __HardwareRepositoryClient:
         return None
 
     def find_in_repository(self, relative_path):
+
         """Finds absolute path of a file or directory matching relativePath
         in one of the hardwareRepository directories
 

@@ -1,4 +1,4 @@
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -16,21 +16,22 @@
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with MXCuBE. If not, see <http://www.gnu.org/licenses/>.
 
-import logging
 import os
-import subprocess
 import time
+import logging
+import subprocess
 
 import gevent
 
 from mxcubecore.BaseHardwareObjects import HardwareObject
-from mxcubecore.HardwareObjects.XSDataAutoprocv1_0 import XSDataAutoprocInput
 from mxcubecore.HardwareObjects.XSDataCommon import (
     XSDataDouble,
     XSDataFile,
     XSDataInteger,
     XSDataString,
 )
+from mxcubecore.HardwareObjects.XSDataAutoprocv1_0 import XSDataAutoprocInput
+
 
 __credits__ = ["EMBL Hamburg"]
 __license__ = "LGPLv3+"
@@ -54,7 +55,7 @@ class EMBLOfflineProcessing(HardwareObject):
     def execute_autoprocessing(
         self, process_event, params_dict, frame_number, run_processing=True
     ):
-        """Method called from collection hwobj after successful collection.
+        """Method called from collection hwobj after successfull collection.
 
         :param process_event: processing type (after, before, image)
         :type process_event: str

@@ -4,7 +4,7 @@ from .Sample import Sample
 
 class Container(Component):
     """
-    Entity class holding state of any hierarchical sample container
+    Entity class holding state of any any hierarchical sample container
     """
 
     def __init__(self, type, container, address, scannable):
@@ -16,7 +16,7 @@ class Container(Component):
 
     def get_type(self):
         """
-        Returns a description of the type of container
+        Returns a desctiption of the type of container
         Known types:
         -    Puck
         -    Vial
@@ -41,7 +41,7 @@ class Container(Component):
 
     def get_sample_list(self):
         """
-        Returns the list of all Sample objects under of this container (recursively)
+        Returns the list of all Sample objects under of this container (recursivelly)
         :rtype: list
         """
         samples = []
@@ -61,7 +61,7 @@ class Container(Component):
 
     def get_present_samples(self):
         """
-        Returns the list of all Sample objects under of this container (recursively) tagged as present
+        Returns the list of all Sample objects under of this container (recursivelly) tagged as present
         :rtype: list
         """
         ret = []
@@ -217,5 +217,5 @@ class Pin(Sample):
         return self.get_index() + 1
 
     @staticmethod
-    def get_sample_address(basket_number, sample_number):
-        return "%s:%02d" % (basket_number, sample_number)
+    def get_sample_address(basket_number, sample_number, separator="_"):
+        return str(basket_number) + separator + "%02d" % (sample_number)

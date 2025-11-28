@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -25,7 +25,11 @@ from mxcubecore.HardwareObjects.abstract.AbstractEnergy import AbstractEnergy
 from mxcubecore.HardwareObjects.mockup.ActuatorMockup import ActuatorMockup
 
 # Default energy value (keV)
-DEFAULT_VALUE = 12.4
+# 13.145 determined by Bill and Serena during start-up
+# 13.234 determined by Bill on Saturday 2024-12-08 
+# 13.2045 determined by Martin on Tuesday 2024-12-10 from LaB6 rings using pyFAI-calib2 on a single image
+# 13.2150 determined by Martin on Thursday 2024-12-12 from LaB6 rings using pyFAI on 394 images collected in multiple series, at two different transmissions over 17 different distances between 110 and 250 mm
+DEFAULT_VALUE = 12.650 #13.1792 #15.3556 #15.306 #15.3485 #15.3700 #13.2150
 # Default energy limits (keV)
 DEFAULT_LIMITS = (4, 20)
 
@@ -47,9 +51,8 @@ class EnergyMockup(ActuatorMockup, AbstractEnergy):
     def get_limits(self):
         my_limits = ActuatorMockup.get_limits(self)
         return my_limits
-
     def _move(self, value):
-        """Simulated energy change
+        """ Simulated energy change
         Args:
             value (float): target energy
         """

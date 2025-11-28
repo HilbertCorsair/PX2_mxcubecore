@@ -1,11 +1,10 @@
+from mxcubecore.BaseHardwareObjects import Device
 from grob import grob_control
 
-from mxcubecore.BaseHardwareObjects import HardwareObject
 
-
-class Grob(HardwareObject):
+class Grob(Device):
     def __init__(self, name):
-        super().__init__(name)
+        Device.__init__(self, name)
         self.SampleTableMotor = grob_control.SampleTableMotor
         self.GonioMotor = grob_control.GonioMotor
         self.SampleMotor = grob_control.SampleMotor

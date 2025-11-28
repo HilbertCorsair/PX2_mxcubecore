@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -17,19 +17,31 @@
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with MXCuBE. If not, see <http://www.gnu.org/licenses/>.
 
-import logging
 import os
-from datetime import datetime
-
+import tine
+import numpy
 import gevent
+import logging
+import tempfile
 
-from mxcubecore.BaseHardwareObjects import HardwareObject
-from mxcubecore.HardwareObjects import SimpleHTML
+import numpy as np
+
+
+from csv import reader
+from time import sleep
+from datetime import datetime
+from random import random
+from scipy.interpolate import interp1d
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_agg import FigureCanvasAgg
 
 # try:
 #    import pdfkit
 # except Exception:
 #    logging.getLogger("HWR").warning("pdfkit not available")
+
+from mxcubecore.HardwareObjects import SimpleHTML
+from mxcubecore.BaseHardwareObjects import HardwareObject
 
 
 __credits__ = ["EMBL Hamburg"]
@@ -68,7 +80,8 @@ class EMBLBeamlineTest(HardwareObject):
         self.beam_focusing_hwobj = None
 
     def init(self):
-        """Reads config xml, initiates all necessary hwobj, channels and cmds"""
+        """Reads config xml, initiates all necessary hwobj, channels and cmds
+        """
         self.ready_event = gevent.event.Event()
 
         self.bl_hwobj = self.get_object_by_role("beamline_setup")
@@ -116,8 +129,6 @@ class EMBLBeamlineTest(HardwareObject):
                 logging.getLogger("HWR").warning(
                     "BeamlineTest: Unable to create test directories"
                 )
-
-                logging.getLogger("HWR").exception("")
                 return
 
         self.results_list = []
@@ -322,7 +333,7 @@ class EMBLBeamlineTest(HardwareObject):
         return result
 
     def measure_flux(self):
-        """Measures intensity"""
+        """Measures intesity"""
         self.bl_hwobj.flux_hwobj.measure_flux()
 
     def stop_comm_process(self):

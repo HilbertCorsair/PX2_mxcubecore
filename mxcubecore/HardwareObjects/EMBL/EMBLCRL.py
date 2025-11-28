@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -19,13 +19,13 @@
 
 """EMBLCRL"""
 
-import logging
 import math
-
+import logging
 import gevent
 
-from mxcubecore import HardwareRepository as HWR
 from mxcubecore.BaseHardwareObjects import HardwareObject
+from mxcubecore import HardwareRepository as HWR
+
 
 __credits__ = ["EMBL Hamburg"]
 __license__ = "LGPLv3+"
@@ -36,6 +36,7 @@ class EMBLCRL(HardwareObject):
     """Controls CRLs"""
 
     def __init__(self, name):
+
         HardwareObject.__init__(self, name)
 
         self.focal_length = None
@@ -123,7 +124,7 @@ class EMBLCRL(HardwareObject):
         self.emit("crlModeChanged", self.current_mode)
 
     def energy_state_changed(self, state):
-        """If CRL's in the automatic mode then change setting according
+        """If CRL's in the automatic mode then change setting accoring
            to the current energy
 
         :param state: energy state
@@ -167,7 +168,8 @@ class EMBLCRL(HardwareObject):
         else:
             lens_combination = value
         return 1.0 / (
-            2 * 341.52 * lens_combination / 2000 / (self.energy_value**2) - 1 / 42.6696
+            2 * 341.52 * lens_combination / 2000 / (self.energy_value ** 2)
+            - 1 / 42.6696
         )
 
     def focusing_mode_requested(self, focusing_mode):
@@ -188,7 +190,7 @@ class EMBLCRL(HardwareObject):
 
     def set_crl_value(self, value, timeout=None):
         """Sets CRL lens combination. If integer passed then
-        converts value to the bit list
+           converts value to the bit list
         """
         if not isinstance(value, (list, tuple)):
             value = self.convert_value(value)

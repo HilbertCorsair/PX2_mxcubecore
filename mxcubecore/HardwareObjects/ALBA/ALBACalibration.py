@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -28,20 +28,19 @@ PySignal simulator (TangoDS).
 
 Example Hardware Object XML file :
 ==================================
-<object class="ALBACalibration">
+<device class="ALBACalibration">
   <username>Calibration</username>
   <taurusname>bl13/ct/variables</taurusname>
   <channel type="sardana" name="calibx">OAV_PIXELSIZE_X</channel>
   <channel type="sardana" name="caliby">OAV_PIXELSIZE_Y</channel>
   <interval>200</interval>
   <threshold>0.001</threshold>
-</object>
+</device>
 """
 
-import logging
-
-from mxcubecore import BaseHardwareObjects
 from mxcubecore import HardwareRepository as HWR
+from mxcubecore import BaseHardwareObjects
+import logging
 
 __author__ = "Jordi Andreu"
 __credits__ = ["MXCuBE collaboration"]
@@ -52,11 +51,12 @@ __email__ = "jandreu[at]cells.es"
 __status__ = "Draft"
 
 
-class ALBACalibration(BaseHardwareObjects.HardwareObject):
+class ALBACalibration(BaseHardwareObjects.Device):
     def __init__(self, name):
-        super().__init__(name)
+        BaseHardwareObjects.Device.__init__(self, name)
 
     def init(self):
+
         self.calibx = self.get_channel_object("calibx")
         self.caliby = self.get_channel_object("caliby")
 

@@ -1,12 +1,12 @@
 """Tango Shutter Hardware Object
 Example XML::
 
-  <object class="ALBAEpsActuator">
+  <device class="ALBAEpsActuator">
     <username>Photon Shutter</username>
     <taurusname>bl13/ct/eps-plc-01</taurusname>
     <channel type="sardana" polling="events" name="actuator">pshu</channel>
     <states>Open,Closed</states>
-  </object>
+  </device>
 
 
 Public Interface:
@@ -42,9 +42,10 @@ Public Interface:
 
 """
 
-import logging
-
+from mxcubecore import HardwareRepository as HWR
 from mxcubecore import BaseHardwareObjects
+import logging
+import time
 
 STATE_OUT, STATE_IN, STATE_MOVING, STATE_FAULT, STATE_ALARM, STATE_UNKNOWN = (
     0,
@@ -56,7 +57,8 @@ STATE_OUT, STATE_IN, STATE_MOVING, STATE_FAULT, STATE_ALARM, STATE_UNKNOWN = (
 )
 
 
-class ALBAFastShutter(BaseHardwareObjects.HardwareObject):
+class ALBAFastShutter(BaseHardwareObjects.Device):
+
     states = {
         STATE_OUT: "out",
         STATE_IN: "in",
@@ -69,9 +71,10 @@ class ALBAFastShutter(BaseHardwareObjects.HardwareObject):
     default_state_strings = ["Out", "In"]
 
     def __init__(self, name):
-        super().__init__(name)
+        BaseHardwareObjects.Device.__init__(self, name)
 
     def init(self):
+
         self.actuator_state = STATE_UNKNOWN
         self.actuator_value = None
         self.motor_position = None
@@ -99,7 +102,9 @@ class ALBAFastShutter(BaseHardwareObjects.HardwareObject):
                 states = state_string.split(",")
                 self.state_strings = states[1].strip(), states[0].strip()
         except Exception:
-            self.log.exception("")
+            import traceback
+
+            logging.getLogger("HWR").warning(traceback.format_exc())
             self.state_strings = self.default_state_strings
 
     def get_state(self):
@@ -111,6 +116,7 @@ class ALBAFastShutter(BaseHardwareObjects.HardwareObject):
         return self.actuator_state
 
     def update_state(self):
+
         if None in [self.actuator_value, self.motor_position, self.motor_state]:
             act_state = STATE_UNKNOWN
         elif str(self.motor_state) == "MOVING":
@@ -161,7 +167,8 @@ class ALBAFastShutter(BaseHardwareObjects.HardwareObject):
         return self.username
 
     def getStatus(self):
-        """ """
+        """
+        """
         state = self.get_state()
 
         if state in [STATE_OUT, STATE_IN]:

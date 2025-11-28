@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -23,9 +23,9 @@ Hardware Object is used to get relevant machine information
 information). Value limits are included
 """
 
-import logging
 import os
 import time
+import logging
 
 try:
     from urllib2 import urlopen
@@ -33,15 +33,13 @@ except ImportError:
     from urllib.request import urlopen
 
 from collections import OrderedDict
-from datetime import (
-    datetime,
-    timedelta,
-)
-
+from datetime import datetime, timedelta
 from gevent import spawn
 
-from mxcubecore import HardwareRepository as HWR
 from mxcubecore.BaseHardwareObjects import HardwareObject
+
+from mxcubecore import HardwareRepository as HWR
+
 
 __credits__ = ["EMBL Hamburg"]
 __license__ = "LGPLv3+"
@@ -49,11 +47,12 @@ __category__ = "General"
 
 
 class EMBLMachineInfo(HardwareObject):
-    """Displays actual information about the beamline"""
+    """Displays actual information about the beamline
+    """
 
     def __init__(self, name):
         """OrderedDict is used to have a sorted items for display
-        and directory like access when updating values
+           and directory like access when updating values
         """
 
         HardwareObject.__init__(self, name)
@@ -118,6 +117,7 @@ class EMBLMachineInfo(HardwareObject):
         self.chan_sc_dewar_overflow_alarm = None
 
     def init(self):
+
         self.update_interval = int(self.get_property("updateIntervalS"))
         self.limits_dict = eval(self.get_property("limits"))
         self.hutch_temp_addr = self.get_property("hutchTempAddress")
@@ -161,7 +161,7 @@ class EMBLMachineInfo(HardwareObject):
             self.cryojet_in_changed(self.chan_cryojet_in.get_value())
             self.chan_cryojet_in.connect_signal("update", self.cryojet_in_changed)
         else:
-            self.log.debug("MachineInfo: Cryojet channel not defined")
+            logging.getLogger("HWR").debug("MachineInfo: Cryojet channel not defined")
 
         self.chan_sc_dewar_low_level_alarm = self.get_channel_object(
             "scLowLevelAlarm", optional=True
@@ -186,7 +186,7 @@ class EMBLMachineInfo(HardwareObject):
                 "update", self.overflow_alarm_changed
             )
 
-        if hasattr(HWR.beamline, "ppu_control"):
+        if HWR.beamline.ppu_control is not None:
             self.values_ordered_dict["ppu"] = {
                 "value": "- - -",
                 "in_range": False,
@@ -341,7 +341,7 @@ class EMBLMachineInfo(HardwareObject):
 
     def file_transfer_status_changed(self, status):
         """
-        Updates info about file being transferred
+        Updates info about file beeing transfered
         :param total: int
         :param pending: int
         :param failed: int
@@ -395,9 +395,9 @@ class EMBLMachineInfo(HardwareObject):
 
         if flux_info["measured"] is None:
             self.values_ordered_dict["flux"]["value"] = 0
-            self.values_ordered_dict["flux"]["value_str"] = (
-                "Beamline mode changed\nRemeasure flux!"
-            )
+            self.values_ordered_dict["flux"][
+                "value_str"
+            ] = "Beamline mode changed\nRemeasure flux!"
             self.values_ordered_dict["flux"]["in_range"] = False
         else:
             msg_str = "Flux: %.2E ph/s\n" % flux_info["measured"]["flux"]
@@ -423,7 +423,7 @@ class EMBLMachineInfo(HardwareObject):
         return self.values_ordered_dict
 
     def get_temp_hum_values(self, sleep_time):
-        """Updates temperature and humidity values"""
+        """Updates temperatur and humidity values"""
         while True:
             temp = self.get_external_value(self.hutch_temp_addr)
             hum = self.get_external_value(self.hutch_hum_addr)
@@ -433,9 +433,9 @@ class EMBLMachineInfo(HardwareObject):
                 ):
                     self.hutch_temp = temp
                     self.hutch_hum = hum
-                    self.values_ordered_dict["temp_hum"]["value"] = (
-                        "%.1f C, %.1f %%" % (temp, hum)
-                    )
+                    self.values_ordered_dict["temp_hum"][
+                        "value"
+                    ] = "%.1f C, %.1f %%" % (temp, hum)
                     self.values_ordered_dict["temp_hum"]["in_range"] = (
                         temp < 25 and hum < 60
                     )
@@ -443,7 +443,8 @@ class EMBLMachineInfo(HardwareObject):
             time.sleep(sleep_time)
 
     def get_current(self):
-        """Returns machine current in mA"""
+        """Returns machine current in mA
+        """
         return self.values_ordered_dict["current"]["value"]
 
     def get_current_value(self):
@@ -459,7 +460,7 @@ class EMBLMachineInfo(HardwareObject):
            implementation how to get a value from epics web tool. At first
            web address string is formed and then web page by urllib2
            extracted. Page contains column with records.
-           Then the last value is chosen as the last active value.
+           Then the last value is choosen as the last active value.
 
         :param addr: epics address
         :type addr: str
@@ -524,7 +525,7 @@ class EMBLMachineInfo(HardwareObject):
                         last_value = line_el[-1]
             last_value = float(last_value)
         except Exception:
-            self.log.debug("MachineInfo: Unable to read epics values")
+            logging.getLogger("HWR").debug("MachineInfo: Unable to read epics values")
         finally:
             if url_file:
                 url_file.close()
@@ -549,7 +550,7 @@ class EMBLMachineInfo(HardwareObject):
             return None, None, None
 
     def sizeof_fmt(self, num):
-        """Returns disk space formatted in string"""
+        """Returns disk space formated in string"""
 
         try:
             for x in ["bytes", "KB", "MB", "GB"]:

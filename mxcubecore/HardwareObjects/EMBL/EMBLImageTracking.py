@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -23,20 +23,21 @@ Hardware object used to control image tracking
 By default ADXV is used
 """
 
-from mxcubecore.BaseHardwareObjects import HardwareObject
+from mxcubecore.BaseHardwareObjects import Device
+
 
 __credits__ = ["EMBL Hamburg"]
 __license__ = "LGPLv3+"
 __category__ = "General"
 
 
-class EMBLImageTracking(HardwareObject):
+class EMBLImageTracking(Device):
     """
     EMBLImageTracking
     """
 
     def __init__(self, *args):
-        super().__init__(*args)
+        Device.__init__(self, *args)
 
         self.state = None
         self.state_dict = {"image_tracking": False, "filter_frames": False}
@@ -48,6 +49,7 @@ class EMBLImageTracking(HardwareObject):
         self.cmd_load_image = None
 
     def init(self):
+
         self.chan_enable_image_tracking = self.get_channel_object(
             "chanImageTrackingEnabled", optional=True
         )

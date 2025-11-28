@@ -1,54 +1,52 @@
-import enum
+import logging
 import time
-
-from gevent import Timeout
-
-from mxcubecore.BaseHardwareObjects import (
-    HardwareObjectState,
+from mxcubecore.HardwareObjects.abstract.AbstractMotor import (
+    AbstractMotor,
+    MotorStates,
 )
-from mxcubecore.HardwareObjects.abstract.AbstractMotor import AbstractMotor
+from gevent import Timeout
 
 """
 Interfaces Sardana Motor objects.
 taurusname is the only obligatory property.
-
-.. code-block:: xml
-
-   <object class="SardanaMotor">
+<device class="SardanaMotor">
     <taurusname>dmot01</taurusname>
     <username>Dummy</username>
     <actuator_name>dummy_motor</actuator_name>
     <threshold>0.005</threshold>
     <move_threshold>0.005</move_threshold>
     <interval>2000</interval>
-   </object>
+</device>
 """
 
 
-class SardanaMotorState(enum.Enum):
-    READY = HardwareObjectState.READY
-    ON = HardwareObjectState.READY
-    OFF = HardwareObjectState.OFF
-    MOVING = HardwareObjectState.BUSY
-    STANDBY = HardwareObjectState.READY
-    FAULT = HardwareObjectState.FAULT
-    INIT = HardwareObjectState.BUSY
-    RUNNING = HardwareObjectState.BUSY
-    ALARM = HardwareObjectState.WARNING
-    DISABLE = HardwareObjectState.OFF
-    UNKNOWN = HardwareObjectState.UNKNOWN
-    INVALID = HardwareObjectState.FAULT
-
-
 class SardanaMotor(AbstractMotor):
+
     suffix_position = "Position"
     suffix_state = "State"
     suffix_stop = "Stop"
     suffix_velocity = "Velocity"
     suffix_acceleration = "Acceleration"
 
+    state_map = {
+        "ON": MotorStates.READY,
+        "OFF": MotorStates.OFF,
+        "CLOSE": MotorStates.DISABLED,
+        "OPEN": MotorStates.DISABLED,
+        "INSERT": MotorStates.DISABLED,
+        "EXTRACT": MotorStates.DISABLED,
+        "MOVING": MotorStates.MOVING,
+        "STANDBY": MotorStates.READY,
+        "FAULT": MotorStates.FAULT,
+        "INIT": MotorStates.INITIALIZING,
+        "RUNNING": MotorStates.MOVING,
+        "ALARM": MotorStates.ALARM,
+        "DISABLE": MotorStates.DISABLED,
+        "UNKNOWN": MotorStates.UNKNOWN,
+    }
+
     def __init__(self, name):
-        super().__init__(name)
+        AbstractMotor.__init__(self, name)
         self.stop_command = None
         self.position_channel = None
         self.state_channel = None
@@ -61,9 +59,9 @@ class SardanaMotor(AbstractMotor):
         self.limit_lower = None
         self.static_limits = (-1e4, 1e4)
         self.limits = (None, None)
+        self.motor_state = MotorStates.NOTINITIALIZED
 
     def init(self):
-        super().init()
 
         self.taurusname = self.get_property("taurusname")
         if not self.taurusname:
@@ -71,27 +69,27 @@ class SardanaMotor(AbstractMotor):
 
         self.actuator_name = self.get_property("actuator_name")
         if not self.name:
-            self.log.info(
+            logging.getLogger("HWR").info(
                 "Undefined property actuator_name in xml. Applying name during instance creation."
             )
-            self.actuator_name = self.name
+            self.actuator_name = self.name()
 
         self.threshold = self.get_property("threshold", self.threshold_default)
-        self.log.debug(
+        logging.getLogger("HWR").debug(
             "Motor {0} threshold = {1}".format(self.actuator_name, self.threshold)
         )
 
         self.move_threshold = self.get_property(
             "move_threshold", self.move_threshold_default
         )
-        self.log.debug(
+        logging.getLogger("HWR").debug(
             "Motor {0} move_threshold = {1}".format(
                 self.actuator_name, self.move_threshold
             )
         )
 
         self.polling = self.get_property("interval", self.polling_default)
-        self.log.debug(
+        logging.getLogger("HWR").debug(
             "Motor {0} polling = {1}".format(self.actuator_name, self.polling)
         )
 
@@ -140,63 +138,77 @@ class SardanaMotor(AbstractMotor):
             "Acceleration",
         )
 
-        self.position_channel.connect_signal("update", self.update_value)
-        self.state_channel.connect_signal("update", self._update_state)
+        self.position_channel.connect_signal("update", self.motor_position_changed)
+        self.state_channel.connect_signal("update", self.motor_state_changed)
 
         self.limits = self.get_limits()
-        self.update_state()
-        self.update_value()
 
-    def get_state(self) -> HardwareObjectState:
-        """Get the motor state
+        (self.limit_lower, self.limit_upper) = self.limits
 
-        Returns:
-            Motor state
-        """
-        try:
-            _state = self.state_channel.get_value()
-            self.specific_state = _state
-            return SardanaMotorState[_state.name].value
-        except (KeyError, AttributeError):
-            return self.STATES.UNKNOWN
+        if self.limit_lower is None:
+            self.limit_lower = self.static_limits[0]
 
-    def _update_state(self, state):
-        try:
-            state = state.upper()
-            state = SardanaMotorState[state].value
-        except (AttributeError, KeyError):
-            state = self.STATES.UNKNOWN
-        return self.update_state(state)
+        if self.limit_upper is None:
+            self.limit_upper = self.static_limits[1]
 
-    def is_ready(self) -> bool:
-        """
-        Returns:
-            True if the motor is ready
-        """
-        return self.get_state() == HardwareObjectState.READY
+    def connect_notify(self, signal):
+        if signal == "valueChanged":
+            self.motor_position_changed()
+        elif signal == "stateChanged":
+            self.motor_state_changed()
 
-    def wait_ready(self, timeout=None):
-        with Timeout(timeout, RuntimeError("Timeout waiting for status ready")):
-            while not self.is_ready():
-                time.sleep(0.1)
+    def updateState(self):
+        """
+        Descript. : forces position and state update
+        """
+        self.motor_position_changed()
+        self.motor_state_changed()
 
-    def is_moving(self) -> bool:
+    def motor_state_changed(self, state=None):
         """
-        Returns:
-            True if the motor is currently moving
+        Descript. : called by the state channels update event
+                    checks if the motor is at it's limit,
+                    and sets the new device state
         """
-        return self.get_state() == HardwareObjectState.BUSY
+        motor_state = self.motor_state
 
-    def wait_end_of_move(self, timeout: float = None) -> None:
+        if state is None:
+            state = self.state_channel.get_value()
+
+        state = str(state)
+        motor_state = SardanaMotor.state_map[state]
+
+        if motor_state != MotorStates.DISABLED:
+            if self.motor_position >= self.limit_upper:
+                motor_state = MotorStates.HIGHLIMIT
+            elif self.motor_position <= self.limit_lower:
+                motor_state = MotorStates.LOWLIMIT
+
+        self.set_ready(motor_state > MotorStates.DISABLED)
+
+        if motor_state != self.motor_state:
+            self.motor_state = motor_state
+            self.emit("stateChanged", (motor_state,))
+
+    def motor_position_changed(self, position=None):
         """
-        Wait till the motor stops
+        Descript. : called by the position channels update event
+                    if the position change exceeds threshold,
+                    valueChanged is fired
         """
-        with Timeout(timeout):
-            # Wait a bit to ensure the motor started moving
-            # 0.1 empirically obtained
-            time.sleep(0.1)
-            while self.is_moving():
-                time.sleep(0.1)
+        if position is None:
+            position = self.position_channel.get_value()
+        if abs(self.motor_position - position) >= self.threshold:
+            self.motor_position = position
+            self.emit("valueChanged", (position,))
+            self.motor_state_changed()
+
+    def get_state(self):
+        """
+        Descript. : returns the current motor state
+        """
+        self.motor_state_changed()
+        return self.motor_state
 
     def get_limits(self):
         """
@@ -204,11 +216,7 @@ class SardanaMotor(AbstractMotor):
                     static_limits is returned
         """
         try:
-            self._nominal_limits = (
-                self.position_channel.info.minval,
-                self.position_channel.info.maxval,
-            )
-            return self._nominal_limits
+            return (self.limit_lower, self.limit_upper)
         except Exception:
             return (None, None)
 
@@ -223,6 +231,7 @@ class SardanaMotor(AbstractMotor):
         """
         Descript. : move to the given position
         """
+        # if abs(absolute_position - current_pos) > self.move_threshold_default:
         self.position_channel.set_value(value)
 
     def stop(self):
@@ -230,6 +239,23 @@ class SardanaMotor(AbstractMotor):
         Descript. : stops the motor immediately
         """
         self.stop_command()
+
+    def is_moving(self):
+        """
+        Descript. : True if the motor is currently moving
+        """
+        return self.is_ready() and self.get_state() == MotorStates.MOVING
+
+    motorIsMoving = is_moving
+
+    def wait_end_of_move(self, timeout=None):
+        """
+        Descript. : waits till the motor stops
+        """
+        with Timeout(timeout):
+            time.sleep(0.1)
+            while self.is_moving():
+                time.sleep(0.1)
 
     def get_velocity(self):
         try:
@@ -245,3 +271,17 @@ class SardanaMotor(AbstractMotor):
             return self.acceleration_channel.get_value()
         except Exception:
             return None
+
+
+def test_hwo(hwo):
+    print(("Position for %s is: %s" % (hwo.username, hwo.get_value())))
+    print(("Velocity for %s is: %s" % (hwo.username, hwo.get_velocity())))
+    print(("Acceleration for %s is: %s" % (hwo.username, hwo.get_acceleration())))
+
+
+#    print("Moving motor to %s" % newpos)
+#    hwo.set_value(newpos, timeout=None)
+#    while hwo.is_moving():
+#        print "Moving"
+#        time.sleep(0.3)
+#    print("Movement done. Position is now: %s" % hwo.get_value())

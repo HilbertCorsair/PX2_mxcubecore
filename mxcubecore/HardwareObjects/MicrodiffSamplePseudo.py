@@ -1,8 +1,7 @@
+from mxcubecore.HardwareObjects.MD2Motor import MD2Motor
+from mxcubecore.HardwareObjects.abstract.AbstractMotor import MotorStates
 import logging
 import math
-
-from mxcubecore.HardwareObjects.abstract.AbstractMotor import MotorStates
-from mxcubecore.HardwareObjects.MD2Motor import MD2Motor
 
 
 class MicrodiffSamplePseudo(MD2Motor):
@@ -30,6 +29,7 @@ class MicrodiffSamplePseudo(MD2Motor):
         self.connect(self.phi, "stateChanged", self.real_motor_changed)
 
     def real_motor_moved(self, _):
+
         self.motor_positions_changed(self.get_value())
 
     def updateMotorState(self):
@@ -54,7 +54,7 @@ class MicrodiffSamplePseudo(MD2Motor):
 
     def motorStateChanged(self, state):
         logging.getLogger().debug(
-            "%s: in motorStateChanged: motor state changed to %s", self.id, state
+            "%s: in motorStateChanged: motor state changed to %s", self.name(), state
         )
         self.emit("stateChanged", (self.motorState,))
 

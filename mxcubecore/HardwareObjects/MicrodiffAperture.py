@@ -1,6 +1,6 @@
 # encoding: utf-8
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -20,8 +20,6 @@
 """
 MicrodiffAperture. Move the aperture in the beam to a specified value or
 out of the beam.
-The factor, which serves to calculate the flux, can be a single value or a
-tuple of values per aperture size.
 
 Example xml file:
 <object class="MicrodiffAperture">
@@ -36,14 +34,12 @@ Example xml file:
   <object role="inout" href="/udiff_apertureinout"/>
 </object>
 """
-
 from ast import literal_eval
 from enum import Enum
-
 from mxcubecore.HardwareObjects.abstract.AbstractNState import BaseValueEnum
 from mxcubecore.HardwareObjects.ExporterNState import ExporterNState
 
-__copyright__ = """ Copyright © 2022 by the MXCuBE collaboration """
+__copyright__ = """ Copyright © 2020 by the MXCuBE collaboration """
 __license__ = "LGPLv3+"
 
 
@@ -53,14 +49,14 @@ class MicrodiffAperture(ExporterNState):
     unit = "um"
 
     def __init__(self, name):
-        super().__init__(name)
+        super(MicrodiffAperture, self).__init__(name)
         self.inout_obj = None
 
     def init(self):
         """Initialize the aperture"""
-        super().init()
+        super(MicrodiffAperture, self).init()
 
-        # check if we have values other that UNKNOWN (no values in config)
+        # check if we have values other that UKNOWN (no values in config)
         if len(self.VALUES) == 1:
             self._initialise_values()
 
@@ -75,13 +71,10 @@ class MicrodiffAperture(ExporterNState):
             value (str, int, float or enum): Value to be set.
         """
         if value.name in ("IN", "OUT"):
-            _eval = self.inout_obj.value_to_enum(value.value)
-            self.inout_obj.set_value(_eval, timeout=60)
+            _e = self.inout_obj.value_to_enum(value.value)
+            self.inout_obj.set_value(_e, timeout=60)
         else:
-            super()._set_value(value)
-            # put the aperture in
-            if self.inout_obj:
-                self.inout_obj.set_value(self.inout_obj.VALUES.IN, timeout=60)
+            super(MicrodiffAperture, self)._set_value(value)
 
     def _initialise_inout(self):
         """Add IN and OUT to the values Enum"""
@@ -122,24 +115,24 @@ class MicrodiffAperture(ExporterNState):
         )
 
     def get_factor(self, label):
-        """Get the factor associated to a label.
+        """ Get the factor associated to a label.
         Args:
             (enum, str): label enum or name
         Returns:
-            (float) or (tuple): Factor value
+            (float): Factor value
         """
         if isinstance(label, str):
             try:
-                return self.VALUES[label].value[2]
+                return float(self.VALUES[label].value[2])
             except (KeyError, ValueError, IndexError):
                 return 1.0
         try:
-            return label.value[2]
+            return float(label.value[2])
         except (ValueError, IndexError):
             return 1.0
 
     def get_size(self, label):
-        """Get the aperture size associated to a label.
+        """ Get the aperture size associated to a label.
         Args:
             (enum, str): label enum or name
         Returns:
@@ -155,20 +148,16 @@ class MicrodiffAperture(ExporterNState):
         try:
             return float(label.value[1])
         except (ValueError, IndexError):
-            if self.inout_obj:
-                return None
             raise RuntimeError("Unknown aperture size")
 
     def get_diameter_size_list(self):
-        """Get the list of values to be visible. Hide IN, OUT and UNKNOWN.
-        Returns:
-            (list): List of available aperture values (string).
-        """
         values = []
         for value in self.VALUES:
-            _nam = value.name
+            _n = value.name
 
-            if _nam not in ["IN", "OUT", "UNKNOWN"]:
-                values.append(_nam)
+            if _n in ["IN", "OUT"]:
+                values.append(_n)
+            elif _n not in ["UNKNOWN"]:
+                values.append(_n[1:])
 
         return values

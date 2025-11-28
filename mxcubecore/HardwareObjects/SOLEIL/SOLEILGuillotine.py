@@ -1,23 +1,22 @@
 # -*- coding: utf-8 -*-
 """Tango Shutter Hardware Object
 Example XML:
-<object class = "TangoShutter">
+<device class = "TangoShutter">
   <username>label for users</username>
   <command type="tango" tangoname="my device" name="Open">Open</command>
   <command type="tango" tangoname="my device" name="Close">Close</command>
   <channel type="tango" name="State" tangoname="my device" polling="1000">State</channel>
-</object>
+</device>
 
 """
 
+from mxcubecore import BaseHardwareObjects
 import logging
 import time
-
-from mxcubecore import BaseHardwareObjects
 from mxcubecore import HardwareRepository as HWR
 
 
-class SOLEILGuillotine(BaseHardwareObjects.HardwareObject):
+class SOLEILGuillotine(BaseHardwareObjects.Device):
     shutterState = {
         # 0:  'ON',
         # 1:  'OFF',
@@ -89,7 +88,7 @@ class SOLEILGuillotine(BaseHardwareObjects.HardwareObject):
     }
 
     def __init__(self, name):
-        super().__init__(name)
+        BaseHardwareObjects.Device.__init__(self, name)
         logging.info("Guillotine init ")
 
     def init(self):
@@ -125,7 +124,7 @@ class SOLEILGuillotine(BaseHardwareObjects.HardwareObject):
                 "tangoname_pss"
             )  # PyTango.DeviceProxy('I11-MA-CE/PSS/DB_DATA')
         except Exception:
-            self.log.error(
+            logging.getLogger("HWR").error(
                 "Guillotine I11-MA-CE/PSS/DB_DATA: tangopssDevice is not defined "
             )
 
@@ -133,7 +132,7 @@ class SOLEILGuillotine(BaseHardwareObjects.HardwareObject):
             self.memIntChan = self.get_channel_object("memInt")
             self.connect(self.memIntChan, "update", self.updateGuillotine)
         else:
-            self.log.error("Guillotine: tangopssDevice is not defined ")
+            logging.getLogger("HWR").error("Guillotine: tangopssDevice is not defined ")
 
     def shutterStateChanged(self, value):
         #

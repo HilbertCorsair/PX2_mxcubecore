@@ -1,18 +1,16 @@
-import math
+from xaloc import XalocJob
+from XSDataCommon import XSDataFile, XSDataString, XSDataInteger
+from XSDataAutoprocv1_0 import XSDataAutoprocInput
+from mxcubecore.BaseHardwareObjects import HardwareObject
+from PyTango import DeviceProxy
 import os
-import sys
+import logging
+import math
 from datetime import datetime
 
 from ALBAClusterJob import ALBAEdnaProcJob
-from PyTango import DeviceProxy
-from XSDataAutoprocv1_0 import XSDataAutoprocInput
-from XSDataCommon import (
-    XSDataFile,
-    XSDataInteger,
-    XSDataString,
-)
 
-from mxcubecore.BaseHardwareObjects import HardwareObject
+import sys
 
 sys.path.append("/beamlines/bl13/controls/devel/pycharm/ALBAClusterClient")
 
@@ -27,7 +25,7 @@ class ALBAAutoProcessing(HardwareObject):
 
         self.template_dir = self.get_property("template_dir")
         var_dsname = self.get_property("variables_ds")
-        self.log.debug(
+        logging.getLogger("HWR").debug(
             "ALBAAutoProcessing INIT: var_ds=%s, template_dir=%s"
             % (var_dsname, self.template_dir)
         )
@@ -35,6 +33,7 @@ class ALBAAutoProcessing(HardwareObject):
 
     # input files for standard collection auto processing
     def create_input_files(self, xds_dir, mosflm_dir, dc_pars):
+
         fileinfo = dc_pars["fileinfo"]
         osc_seq = dc_pars["oscillation_sequence"][0]
 
@@ -193,13 +192,15 @@ class ALBAAutoProcessing(HardwareObject):
 
     # trigger auto processing for standard collection
     def trigger_auto_processing(self, dc_pars):
-        self.log.debug(" ALBAAutoProcessing. triggering auto processing.")
+        logging.getLogger("HWR").debug(
+            " ALBAAutoProcessing. triggering auto processing."
+        )
 
         dc_id = dc_pars["collection_id"]
         output_dir = dc_pars["ednaproc_dir"]
 
-        self.log.debug("    - collection_id = %s " % dc_id)
-        self.log.debug("    - output_dir    = %s " % output_dir)
+        logging.getLogger("HWR").debug("    - collection_id = %s " % dc_id)
+        logging.getLogger("HWR").debug("    - output_dir    = %s " % output_dir)
 
         job = ALBAEdnaProcJob()
         input_file = self.input_file  # TODO

@@ -1,9 +1,9 @@
 import base64
 import pickle
-
 import gevent
-from PyTango.gevent import DeviceProxy
+import logging
 
+from mxcubecore.TaskUtils import task
 from mxcubecore.HardwareObjects.abstract.AbstractSampleChanger import (
     SampleChanger,
     SampleChangerState,
@@ -12,7 +12,7 @@ from mxcubecore.HardwareObjects.abstract.sample_changer.Container import (
     Container,
     Sample,
 )
-from mxcubecore.TaskUtils import task
+from PyTango.gevent import DeviceProxy
 
 
 class Pin(Sample):
@@ -285,6 +285,23 @@ class FlexHCD(SampleChanger):
 
         self._update_selection()
 
+    @task
+    def load_sample(
+        self,
+        holderLength,
+        sample_id=None,
+        sample_location=None,
+        sampleIsLoadedCallback=None,
+        failureCallback=None,
+        prepareCentring=True,
+    ):
+        self._assert_ready()
+        cell, basket, sample = sample_location
+        sample = self.get_component_by_address(
+            Pin.get_sample_address(cell, basket, sample)
+        )
+        return self.load(sample)
+
     def chained_load(self, old_sample, sample):
         self._assert_ready()
         if self.exporter_addr:
@@ -319,7 +336,7 @@ class FlexHCD(SampleChanger):
                 if "on_gonio" in loading_state:
                     self._set_loaded_sample(sample)
                     with gevent.Timeout(60, RuntimeError(err_msg)):
-                        self.log.info(err_msg)
+                        logging.getLogger("HWR").info(err_msg)
                         while not self._execute_cmd_exporter(
                             "getRobotIsSafe", attribute=True
                         ):
@@ -332,7 +349,7 @@ class FlexHCD(SampleChanger):
                 if "on_gonio" in loading_state:
                     self._set_loaded_sample(sample)
                     with gevent.Timeout(60, RuntimeError(err_msg)):
-                        self.log.info(err_msg)
+                        logging.getLogger("HWR").info(err_msg)
                         while (
                             not self._execute_cmd(
                                 "get_robot_cache_variable", "data:dioRobotIsSafe"
@@ -343,9 +360,9 @@ class FlexHCD(SampleChanger):
                     return True
             gevent.sleep(2)
 
-        self.log.info("unload load task done")
+        logging.getLogger("HWR").info("unload load task done")
         for msg in self.get_robot_exceptions():
-            self.log.error(msg)
+            logging.getLogger("HWR").error(msg)
 
         return self._check_pin_on_gonio()
 
@@ -360,7 +377,7 @@ class FlexHCD(SampleChanger):
             self._prepare_centring_task()
             return True
         else:
-            self.log.info("reset loaded sample")
+            logging.getLogger("HWR").info("reset loaded sample")
             self._reset_loaded_sample()
             # if self.controller:
             #    self.controller.hutch_actions(release_interlock=True)
@@ -391,7 +408,7 @@ class FlexHCD(SampleChanger):
             res = SampleChanger.load(self, sample)
         finally:
             for msg in self.get_robot_exceptions():
-                self.log.error(msg)
+                logging.getLogger("HWR").error(msg)
         if res:
             self.prepare_centring()
         return res
@@ -419,12 +436,12 @@ class FlexHCD(SampleChanger):
 
         if not sample:
             sample = self.get_loaded_sample().get_address()
-
+        
         try:
             SampleChanger.unload(self, sample)
         finally:
             for msg in self.get_robot_exceptions():
-                self.log.error(msg)
+                logging.getLogger("HWR").error(msg)
 
     def get_gripper(self):
         if self.exporter_addr:
@@ -440,6 +457,7 @@ class FlexHCD(SampleChanger):
         grippers = []
 
         try:
+        
             if self.exporter_addr:
                 ret = sorted(
                     self._execute_cmd_exporter("getSupportedGrippers", attribute=True)
@@ -447,7 +465,7 @@ class FlexHCD(SampleChanger):
                 for gripper in ret:
                     grippers.append(self.gripper_types[gripper])
             else:
-                ret = [1, 3]  # self._execute_cmd("get_supported_grippers")
+                ret = [1, 3] #self._execute_cmd("get_supported_grippers")
 
                 for gripper in ret:
                     grippers.append(self.gripper_types[gripper])

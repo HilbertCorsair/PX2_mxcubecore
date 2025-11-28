@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -30,7 +30,7 @@ paired backlight intensity (slave IOR)
 
 [Commands]
 
-[Emitted signals]
+[Emited signals]
 - stateChanged
 - predefinedPositionChanged
 
@@ -43,14 +43,15 @@ paired backlight intensity (slave IOR)
 
 Example Hardware Object XML file :
 ==================================
-<object class="ALBAZoomMotorAutoBrightness">
+<device class="ALBAZoomMotorAutoBrightness">
   <object role="zoom" hwrid="/zoom"></object>
   <object role="blight" hwrid="/blight"></object>
-</object>
+</device>
 """
 
 from mxcubecore import BaseHardwareObjects
 from mxcubecore.HardwareObjects.abstract.AbstractMotor import AbstractMotor
+import logging
 
 __author__ = "Jordi Andreu"
 __credits__ = ["MXCuBE collaboration"]
@@ -61,14 +62,15 @@ __email__ = "jandreu[at]cells.es"
 __status__ = "Draft"
 
 
-class ALBAZoomMotorAutoBrightness(BaseHardwareObjects.HardwareObject, AbstractMotor):
+class ALBAZoomMotorAutoBrightness(BaseHardwareObjects.Device, AbstractMotor):
+
     INIT, FAULT, READY, MOVING, ONLIMIT = range(5)
 
     def __init__(self, name):
-        super().__init__(name)
+        BaseHardwareObjects.Device.__init__(self, name)
 
     def init(self):
-        self.log.debug("Initializing zoom motor autobrightness IOR")
+        logging.getLogger("HWR").debug("Initializing zoom motor autobrightness IOR")
 
         self.zoom = self.get_object_by_role("zoom")
         self.blight = self.get_object_by_role("blight")
@@ -78,12 +80,12 @@ class ALBAZoomMotorAutoBrightness(BaseHardwareObjects.HardwareObject, AbstractMo
 
     def get_predefined_positions_list(self):
         retlist = self.zoom.get_predefined_positions_list()
-        self.log.debug("Zoom positions list: %s" % repr(retlist))
+        logging.getLogger("HWR").debug("Zoom positions list: %s" % repr(retlist))
         return retlist
 
     def moveToPosition(self, posno):
         # no = posno.split()[0]
-        # self.log.debug("Moving to position %s" % no)
+        # logging.getLogger("HWR").debug("Moving to position %s" % no)
 
         # self.blight.moveToPosition(posno)
         self.zoom.moveToPosition(posno)
@@ -122,20 +124,22 @@ class ALBAZoomMotorAutoBrightness(BaseHardwareObjects.HardwareObject, AbstractMo
     def get_current_position_name(self):
         #        n = int(self.positionChannel.get_value())
         #        value = "%s z%s" % (n, n)
-        #        self.log.debug("get_current_position_name: %s" % repr(value))
+        #        logging.getLogger("HWR").debug("get_current_position_name: %s" % repr(value))
         #        return value
         return self.zoom.get_current_position_name()
 
     def stateChanged(self, state):
-        self.log.debug("stateChanged emitted: %s" % state)
+        logging.getLogger("HWR").debug("stateChanged emitted: %s" % state)
         self.emit("stateChanged", (self.get_state(),))
 
     def positionChanged(self, currentposition):
         currentposition = self.get_current_position_name()
-        self.log.debug("predefinedPositionChanged emitted: %s" % currentposition)
+        logging.getLogger("HWR").debug(
+            "predefinedPositionChanged emitted: %s" % currentposition
+        )
         # Update light brightness step-by-step
         posno = currentposition.split()[0]
-        self.log.debug("Moving brightness to: %s" % posno)
+        logging.getLogger("HWR").debug("Moving brightness to: %s" % posno)
 
         self.blight.moveToPosition(posno)
 
