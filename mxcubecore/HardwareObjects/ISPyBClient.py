@@ -155,7 +155,7 @@ def utf_decode(res_d):
 
 
 try:
-    sys.path.insert(0, "/usr/local/experimental_methods")
+    sys.path.insert(0, "/nfs/ruche/share-dev/px2dev/MXCuBE/WebApp/experimental_methods")
     from speech import speech
 except ModuleNotFoundError:
     from experimental_methods import speech

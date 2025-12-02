@@ -35,7 +35,7 @@ __version__ = "2.3."
 __category__ = "General"
 
 try:
-    sys.path.insert(0, "/usr/local/experimental_methods")
+    sys.path.insert(0, "/nfs/ruche/share-dev/px2dev/MXCuBE/WebApp/experimental_methods")
     from speech import speech
     from omega_scan import omega_scan
     from inverse_scan import inverse_scan
@@ -756,7 +756,7 @@ class PX2Collect(AbstractCollect, speech):
         return image_id
 
     def set_image_quality_indicators_plot(self, collection_id, directory, name_pattern, cartography_filename, csv_filename):
-        os.system(f"/usr/local/conda/envs/murko_3.11/bin/python /usr/local/experimental_methods/diffraction_experiment_analysis.py -d {directory} -n {name_pattern} &")
+        os.system(f"/usr/local/conda/envs/murko_3.11/bin/python /nfs/ruche/share-dev/px2dev/MXCuBE/WebApp/experimental_methods/diffraction_experiment_analysis.py -d {directory} -n {name_pattern} &")
         
         if HWR.beamline.lims:
             HWR.beamline.lims.set_image_quality_indicators_plot(

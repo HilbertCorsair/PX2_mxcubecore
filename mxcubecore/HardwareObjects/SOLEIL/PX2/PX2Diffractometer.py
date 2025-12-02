@@ -1606,7 +1606,7 @@ class PX2Diffractometer(GenericDiffractometer):
         # )
         
         execute_line = (
-            f"/usr/local/conda/envs/murko_3.11/bin/python /usr/local/experimental_methods/shape_from_diffraction_tomography.py -d {directory} -n {name_pattern} -M {method} -D &"
+            f"/usr/local/conda/envs/murko_3.11/bin/python /nfs/ruche/share-dev/px2dev/MXCuBE/WebAp/pexperimental_methods/shape_from_diffraction_tomography.py -d {directory} -n {name_pattern} -M {method} -D &"
         )
 
         self.log.info("excenter angles %s" % angles)
