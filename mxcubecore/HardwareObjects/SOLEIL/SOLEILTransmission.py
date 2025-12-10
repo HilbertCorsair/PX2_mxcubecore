@@ -19,14 +19,13 @@
 
 
 import gevent
-from mxcubecore.HardwareObjects.abstract.AbstractTransmission import (
-    AbstractTransmission,
-)
+from abstract.AbstractTransmission import AbstractTransmission
 
 try:
     from transmission import transmission
 except ModuleNotFoundError:
     from experimental_methods import transmission
+
     
 class SOLEILTransmission(AbstractTransmission):
     

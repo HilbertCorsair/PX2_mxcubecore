@@ -2,12 +2,12 @@ import os
 import time
 import logging
 import re
-import Session
+from Session import Session
 
-class SOLEILSession(Session.Session):
+class SOLEILSession(Session):
 
     def __init__(self, *args, **kwargs):
-        Session.Session.__init__(self, *args, **kwargs)
+        Session.__init__(self, *args, **kwargs)
         self.username = ""
         self.gid = ""
         self.uid = ""
