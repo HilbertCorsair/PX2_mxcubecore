@@ -1,5 +1,5 @@
 #
-#  Project: MXCuBE
+#  Project name: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -16,21 +16,20 @@
 #
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with MXCuBE. If not, see <http://www.gnu.org/licenses/>.
-import logging
-from enum import IntEnum, unique
+from enum import (
+    IntEnum,
+    unique,
+)
 
 import gevent.event
-
-from mxcubecore.BaseHardwareObjects import ConfiguredObject
-from mxcubecore.dispatcher import dispatcher
-
-# import mxcubecore.HardwareObjects.datamodel
 
 # Using jsonschma for validating the JSCONSchemas
 # https://json-schema.org/
 # https://github.com/Julian/jsonschema
+from mxcubecore.BaseHardwareObjects import ConfiguredObject
+from mxcubecore.dispatcher import dispatcher
 
-from jsonschema import validate, ValidationError
+# import mxcubecore.model.procedure_model
 
 
 __credits__ = ["MXCuBE collaboration"]
@@ -50,8 +49,6 @@ class ProcedureState(IntEnum):
 
 
 class AbstractProcedure(ConfiguredObject):
-    __content_roles = []
-
     _ARGS_CLASS = ()
     _KWARGS_CLASS = {}
     _RESULT_CLASS = ()
@@ -107,7 +104,7 @@ class AbstractProcedure(ConfiguredObject):
         Override to implement main task logic
 
         Args:
-            data_model: sub class of mxcubecore.HardwareObjects.datamodel
+            data_model: sub class of mxcubecore.model.procedure_model
             dict in Python 2.7 and Data class in Python 3.7. Data is validated
             by the data_model object
 
@@ -120,9 +117,8 @@ class AbstractProcedure(ConfiguredObject):
         Override to implement pre execute task logic
 
         Args:
-            data_model: sub class of mxcubecore.HardwareObjects.datamodel
-            dict in Python 2.7 and Data class in Python 3.7. Data is validated
-            by the data_model object
+            data_model: sub class of mxcubecore.model.procedure_model
+            Data is validated by the data_model object
 
         Returns:
         """
@@ -133,9 +129,8 @@ class AbstractProcedure(ConfiguredObject):
         Override to implement post execute task logic
 
         Args:
-            data_model: sub class of mxcubecore.HardwareObjects.datamodel
-            dict in Python 2.7 and Data class in Python 3.7. Data is validated
-            by the data_model object
+            data_model: sub class of mxcubecore.model.procedure_model
+            Data is validated by the data_model object
 
         Returns:
         """
@@ -188,14 +183,14 @@ class AbstractProcedure(ConfiguredObject):
         except Exception as ex:
             self._state = ProcedureState.ERROR
             self._msg = "Procedure execution error (%s)" % str(ex)
-            logging.getLogger("HWR").exception(self._msg)
+            self.log.exception(self._msg)
         finally:
             try:
                 self._post_execute(data_model)
             except Exception as ex:
                 self._state = ProcedureState.ERROR
                 self._msg = "Procedure post_execute error (%s)" % str(ex)
-                logging.getLogger("HWR").exception(self._msg)
+                self.log.exception(self._msg)
 
             self._ready_event.set()
 
@@ -261,16 +256,15 @@ class AbstractProcedure(ConfiguredObject):
         """
         Starts procedure
         Args:
-            data_model: sub class of mxcubecore.HardwareObjects.datamodel
-            dict in Python 2.7 and Data class in Python 3.7. Data is validated
-            by the data_model object
+            data_model: sub class of mxcubecore.model.procedure_model.
+            Data is validated by the data_model object
 
         Returns:
             (Greenlet) The gevent task
         """
         if self._state != ProcedureState.READY:
             self._msg = "Procedure (%s) is already running" % str(self)
-            logging.getLogger("HWR").error(self._msg)
+            self.log.error(self._msg)
         else:
             self._task = gevent.spawn(self._start, data_model)
 

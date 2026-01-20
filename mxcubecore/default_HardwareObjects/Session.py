@@ -49,7 +49,7 @@ class Session(HardwareObject):
     def endstation_name(self) -> str:
         return self.config.endstation_name
 
-    def init(self):
+    def _init(self):
         def get_inhouse_proposals():
             """
             get the optional 'inhouse_users' config property

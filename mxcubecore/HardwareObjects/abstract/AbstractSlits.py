@@ -1,5 +1,5 @@
 #
-#  Project: MXCuBE
+#  Project name: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -17,11 +17,12 @@
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with MXCuBE. If not, see <http://www.gnu.org/licenses/>.
 
-"""
-"""
-import abc
-from mxcubecore.BaseHardwareObjects import HardwareObject
+""" """
 
+import abc
+from warnings import warn
+
+from mxcubecore.BaseHardwareObjects import HardwareObject
 
 __credits__ = ["MXCuBE collaboration"]
 __version__ = "2.3"
@@ -30,8 +31,12 @@ __version__ = "2.3"
 class AbstractSlits(HardwareObject, object):
     __metaclass__ = abc.ABCMeta
 
-    def __init__(self, *args):
-        HardwareObject.__init__(self, *args)
+    def __init__(self, name: str):
+        warn(
+            "AbstractSlits is deprecated. Use specific motors instead",
+            DeprecationWarning,
+        )
+        HardwareObject.__init__(self, name)
 
         self._value = [None, None]
         self._min_limits = [None, None]

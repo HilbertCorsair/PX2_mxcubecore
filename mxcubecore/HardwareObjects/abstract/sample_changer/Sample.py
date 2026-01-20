@@ -1,4 +1,5 @@
 import sys
+
 from .Component import Component
 
 try:
@@ -72,9 +73,6 @@ class Sample(Component):
                 img_url = self.get_property(self.__IMAGE_URL_PROPERTY__)
                 if len(img_url) == 0:
                     return None
-                import urllib.request
-                import urllib.parse
-                import urllib.error
 
                 f = urlopen(img_url)
                 img = f.read()

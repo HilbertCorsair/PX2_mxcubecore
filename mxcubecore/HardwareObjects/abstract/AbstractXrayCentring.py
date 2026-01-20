@@ -1,4 +1,3 @@
-#! /usr/bin/env python
 # encoding: utf-8
 #
 # This file is part of MXCuBE.
@@ -15,11 +14,14 @@
 #
 # You should have received a copy of the GNU Lesser General Public License
 # along with MXCuBE.  If not, see <https://www.gnu.org/licenses/>.
-"""Xray Centring Abstract Class with yaml configuration file.
-"""
+"""Xray Centring Abstract Class with yaml configuration file."""
 
-from __future__ import division, absolute_import
-from __future__ import print_function, unicode_literals
+from __future__ import (
+    absolute_import,
+    division,
+    print_function,
+    unicode_literals,
+)
 
 __copyright__ = """ Copyright © 2016 - 2022 by MXCuBE Collaboration """
 __license__ = "LGPLv3+"
@@ -28,12 +30,12 @@ __date__ = "25/03/2022"
 
 import abc
 
-from mxcubecore.BaseHardwareObjects import HardwareObjectYaml
 from mxcubecore import HardwareRepository as HWR
+from mxcubecore.BaseHardwareObjects import HardwareObject
 from mxcubecore.model import queue_model_objects
 
 
-class AbstractXrayCentring(HardwareObjectYaml):
+class AbstractXrayCentring(HardwareObject):
     """Xray Centring Hardware Object. Set to Yaml configuration."""
 
     def __init__(self, name):
@@ -86,8 +88,7 @@ class AbstractXrayCentring(HardwareObjectYaml):
         """
 
     def post_execute(self):
-        """The workflow has finished, sets the state to 'READY'.
-        """
+        """The workflow has finished, sets the state to 'READY'."""
 
         self._queue_entry = None
         self._data_collection_group = None

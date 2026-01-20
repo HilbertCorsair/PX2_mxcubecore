@@ -4,12 +4,14 @@ Session hardware object.
 Contains information regarding the current session and methods to
 access and manipulate this information.
 """
+
 import os
 import time
-import socket
+from pathlib import Path
+from typing import Tuple
 
 from mxcubecore.BaseHardwareObjects import HardwareObject
-from mxcubecore.HardwareObjects.queue_model_objects import PathTemplate
+from mxcubecore.model.queue_model_objects import PathTemplate
 
 default_raw_data_folder = "RAW_DATA"
 default_processed_data_folder = "PROCESSED_DATA"
@@ -20,23 +22,14 @@ class Session(HardwareObject):
     def __init__(self, name):
         HardwareObject.__init__(self, name)
 
-        self.synchrotron_name = None
-        self.beamline_name = None
-
         self.session_id = None
         self.proposal_code = None
         self.proposal_number = None
         self.proposal_id = None
         self.in_house_users = []
-        self.endstation_name = None
         self.session_start_date = None
         self.user_group = ""
-        self.email_extension = None
-        self.template = None
-
-        self.default_precision = "05"
-        self.suffix = None
-
+        self.default_precision = 5
         self.base_directory = None
         self.base_process_directory = None
         self.base_archive_directory = None
@@ -44,74 +37,70 @@ class Session(HardwareObject):
         self.raw_data_folder_name = default_raw_data_folder
         self.processed_data_folder_name = default_processed_data_folder
 
-    # Framework-2 method, inherited from HardwareObject and called
-    # by the framework after the object has been initialized.
-    def init(self):
-        self.synchrotron_name = self.get_property("synchrotron_name")
-        self.beamline_name = self.get_property("beamline_name")
-        self.endstation_name = self.get_property("endstation_name").lower()
+    @property
+    def synchrotron_name(self) -> str:
+        return self.config.synchrotron_name
 
-        self.suffix = self["file_info"].get_property("file_suffix")
-        self.template = self["file_info"].get_property("file_template")
+    @property
+    def beamline_name(self) -> str:
+        return self.config.beamline_name
 
-        base_directory = self["file_info"].get_property("base_directory")
+    @property
+    def endstation_name(self) -> str:
+        return self.config.endstation_name
 
-        base_process_directory = self["file_info"].get_property(
-            "processed_data_base_directory"
-        )
+    def _init(self):
+        def get_inhouse_proposals():
+            """
+            get the optional 'inhouse_users' config property
 
-        base_archive_directory = self["file_info"].get_property(
-            "archive_base_directory"
-        )
+            return the property, or an empty list if the property is not specified
+            """
+            inhouse_users = self.get_property("inhouse_users")
+            if inhouse_users:
+                return inhouse_users.get("proposal", [])
 
-        folder_name = self["file_info"].get_property("raw_data_folder_name")
+            # property not specified
+            return []
+
+        file_info = self.config.file_info
+
+        folder_name = file_info.get("raw_data_folder_name")
         if folder_name and folder_name.strip():
             self.raw_data_folder_name = folder_name
 
-        folder_name = self["file_info"].get_property("processed_data_folder_name")
+        folder_name = file_info.get("processed_data_folder_name")
         if folder_name and folder_name.strip():
             self.processed_data_folder_name = folder_name
 
-        archive_folder = self["file_info"].get_property("archive_folder")
+        archive_folder = file_info.get("archive_folder")
         if archive_folder:
             archive_folder = archive_folder.strip()
         if not archive_folder:
             archive_folder = default_archive_folder
-        try:
-            inhouse_proposals = self["inhouse_users"]["proposal"]
-            for prop in inhouse_proposals:
-                self.in_house_users.append(
-                    (prop.get_property("code"), str(prop.get_property("number")))
-                )
-        except KeyError:
-            pass
 
-        email_extension = self.get_property("email_extension")
-        if email_extension:
-            self.email_extension = email_extension
-        else:
-            try:
-                domain = socket.getfqdn().split(".")
-                self.email_extension = ".".join((domain[-2], domain[-1]))
-            except (TypeError, IndexError):
-                pass
+        self.in_house_users = [
+            (prop["code"], str(prop["number"])) for prop in get_inhouse_proposals()
+        ]
 
         self.set_base_data_directories(
-            base_directory,
-            base_process_directory,
-            base_archive_directory,
+            file_info["base_directory"],
+            file_info["processed_data_base_directory"],
+            file_info["archive_base_directory"],
             raw_folder=self.raw_data_folder_name,
             process_folder=self.processed_data_folder_name,
             archive_folder=archive_folder,
         )
 
         try:
-            precision = int(self["file_info"].get_property("precision", ""))
+            precision = int(file_info.get("precision", self.default_precision))
         except ValueError:
             precision = self.default_precision
 
         PathTemplate.set_precision(precision)
-        PathTemplate.set_path_template_style(self.synchrotron_name, self.template)
+        PathTemplate.set_path_template_style(
+            self.synchrotron_name, file_info.get("file_template")
+        )
 
     def set_base_data_directories(
         self,
@@ -122,7 +111,6 @@ class Session(HardwareObject):
         process_folder="PROCESSED_DATA",
         archive_folder="ARCHIVE",
     ):
-
         self.base_directory = base_directory
         self.base_process_directory = base_process_directory
         self.base_archive_directory = base_archive_directory
@@ -149,7 +137,10 @@ class Session(HardwareObject):
         directory = ""
 
         if self.session_start_date:
-            start_time = self.session_start_date.split(" ")[0].replace("-", "")
+            # start_time = self.session_start_date.split(" ")[0].replace("-", "")
+            start_time = (
+                self.session_start_date
+            )  # .strftime("%Y%m%d")  # .split(" ")[0].replace("-", "")
         else:
             start_time = time.strftime("%Y%m%d")
 
@@ -174,6 +165,41 @@ class Session(HardwareObject):
 
         return directory
 
+    def prepare_directories(self, _session):
+        """
+        Prepares directories required for the given session.
+
+        This method is a placeholder intended to be overridden in subclasses
+        to implement logic for creating or preparing directories. By default,
+        the method is empty and does not perform any actions nor raise errors,
+        since its implementation may be skipped in some cases.
+
+        Args:
+            _session: The session object containing session-specific
+                    information.
+        """
+        # pass statement is required by python 3.10
+        pass  # noqa: PIE790
+
+    def get_path_with_proposal_as_root(self, path: str) -> str:
+        """
+        Strips the beginning of the path so that it starts with
+        the proposal folder as root
+
+        :path: The full path
+        :returns: Path stripped so that it starts with proposal
+        """
+        if self.is_inhouse():
+            user_category = "inhouse"
+            directory = os.path.join(
+                self.base_directory, self.endstation_name, user_category
+            )
+        else:
+            user_category = "visitor"
+            directory = os.path.join(self.base_directory, user_category)
+
+        return path.split(directory)[1]
+
     def get_base_image_directory(self):
         """
         :returns: The base path for images.
@@ -183,53 +209,64 @@ class Session(HardwareObject):
 
     def get_base_process_directory(self):
         """
-        :returns: The base path for procesed data.
+        :returns: The base path for processed data.
         :rtype: str
         """
         return os.path.join(
             self.get_base_data_directory(), self.processed_data_folder_name
         )
 
-    def get_image_directory(self, sub_dir=None):
+    def get_image_directory(self, sub_dir: str = "") -> str:
         """
-        Returns the full path to images, using the name of each of
-        data_nodes parents as sub directories.
+        Returns the full path to images
 
-        :param data_node: The data node to get additional
-                          information from, (which will be added
-                          to the path).
-        :type data_node: TaskNode
-
-        :returns: The full path to images.
-        :rtype: str
-        """
-        directory = self.get_base_image_directory()
-
-        if sub_dir:
-            sub_dir = sub_dir.replace(" ", "").replace(":", "-")
-            directory = os.path.join(directory, sub_dir) + os.path.sep
-
-        return directory
-
-    def get_process_directory(self, sub_dir=None):
-        """
-        Returns the full path to processed data, using the name of
-        each of data_nodes parents as sub directories.
-
-        :param data_node: The data node to get additional
-                          information from, (which will be added
-                          to the path).
-        :type data_node: TaskNode
+        :param subdir: sub directory relative to path returned
+                       by get_base_image_directory
 
         :returns: The full path to images.
         """
-        directory = self.get_base_process_directory()
+        directory = Path(self.get_base_image_directory())
 
         if sub_dir:
             sub_dir = sub_dir.replace(" ", "").replace(":", "-")
-            directory = os.path.join(directory, sub_dir) + "/"
+            directory = Path(directory, sub_dir)
 
-        return directory
+        return f"{directory}/"
+
+    def get_process_directory(self, sub_dir: str = "") -> str:
+        """
+        Returns the full path to processed data,
+
+        :param subdir: sub directory relative to path returned
+                       by get_base_process_directory
+
+        :returns: The full path to processed data.
+        """
+        directory = Path(self.get_base_process_directory())
+
+        if sub_dir:
+            sub_dir = sub_dir.replace(" ", "").replace(":", "-")
+            directory = Path(directory, sub_dir)
+
+        return f"{directory}/"
+
+    def get_full_paths(self, subdir: str = "", tag: str = "") -> Tuple[str, str]:
+        """
+        Returns the full path to both image and processed data.
+        The path(s) returned will follow the convention:
+
+          <base_directory>/<subdir>/run_<NUMBER>_<tag>
+
+        Where NUMBER is a automatically sequential number and
+        base_directory the path returned by get_base_image/process_directory
+
+        :param subdir: subdirectory
+        :param tag: tag for
+
+        :returns: Tuple with the full path to image and processed data
+        """
+
+        return self.get_image_directory(subdir), self.get_process_directory(subdir)
 
     def get_default_prefix(self, sample_data_node=None, generic_name=False):
         """
@@ -249,26 +286,49 @@ class Session(HardwareObject):
         prefix = proposal
 
         if sample_data_node:
-            if sample_data_node.has_lims_data():
-                prefix = (
-                    sample_data_node.crystals[0].protein_acronym
-                    + "-"
-                    + sample_data_node.name
-                )
+            name = sample_data_node.name
+            protein_acronym = sample_data_node.crystals[0].protein_acronym
+            if protein_acronym:
+                if name:
+                    prefix = "%s-%s" % (protein_acronym, name)
+                else:
+                    prefix = protein_acronym
+            else:
+                prefix = name or ""
         elif generic_name:
             prefix = "<acronym>-<name>"
 
         return prefix
 
+    def get_default_subdir(self, sample_data: dict) -> str:
+        """
+        Gets the default sub-directory based on sample information
+
+        Args:
+           sample_data: Lims sample dictionary
+
+        Returns:
+           Sub-directory path string
+        """
+
+        subdir = ""
+
+        if isinstance(sample_data, dict):
+            sample_name = sample_data.get("sampleName", "")
+            protein_acronym = sample_data.get("proteinAcronym", "")
+        else:
+            sample_name = sample_data.name
+            protein_acronym = sample_data.crystals[0].protein_acronym
+
+        if protein_acronym:
+            subdir = "%s/%s-%s/" % (protein_acronym, protein_acronym, sample_name)
+        else:
+            subdir = "%s/" % sample_name
+
+        return subdir.replace(":", "-")
+
     def get_archive_directory(self):
-        archive_directory = os.path.join(
-            self["file_info"].get_property("archive_base_directory"),
-            self["file_info"].get_property("archive_folder"),
-        )
-
-        archive_directory = PathTemplate.get_archive_directory()
-
-        return archive_directory
+        return PathTemplate.get_archive_directory()
 
     def get_proposal(self):
         """
@@ -284,14 +344,14 @@ class Session(HardwareObject):
 
             proposal = "%s%s" % (self.proposal_code, self.proposal_number)
 
-        return proposal
+        return proposal.lower().replace("-", "")
 
     def is_inhouse(self, proposal_code=None, proposal_number=None):
         """
         Determines if a given proposal is considered to be inhouse.
 
         :param proposal_code: Proposal code
-        :type propsal_code: str
+        :type proposal_code: str
 
         :param proposal_number: Proposal number
         :type proposal_number: str

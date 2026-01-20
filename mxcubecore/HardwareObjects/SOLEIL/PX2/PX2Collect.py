@@ -29,7 +29,7 @@ from mxcubecore.BaseHardwareObjects import HardwareObject
 from mxcubecore.HardwareObjects.abstract.AbstractCollect import AbstractCollect
 
 from mxcubecore import HardwareRepository as HWR
-
+print("Checkpoint 1")
 __credits__ = ["Synchrotron SOLEIL"]
 __version__ = "2.3."
 __category__ = "General"

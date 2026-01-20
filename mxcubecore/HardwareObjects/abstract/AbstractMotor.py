@@ -1,6 +1,6 @@
 # encoding: utf-8
 #
-#  Project: MXCuBE
+#  Project name: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -25,12 +25,13 @@ Emits signals valueChanged and limitsChanged.
 """
 
 import abc
-from enum import Enum, unique
+from enum import (
+    Enum,
+    unique,
+)
 
 from mxcubecore.BaseHardwareObjects import HardwareObjectState
-from mxcubecore.HardwareObjects.abstract.AbstractActuator import (
-    AbstractActuator,
-)
+from mxcubecore.HardwareObjects.abstract.AbstractActuator import AbstractActuator
 
 __copyright__ = """ Copyright © 2010-2020 by the MXCuBE collaboration """
 __license__ = "LGPLv3+"
@@ -55,13 +56,13 @@ class AbstractMotor(AbstractActuator):
     SPECIFIC_STATES = MotorStates
 
     def __init__(self, name):
-        AbstractActuator.__init__(self, name)
+        super().__init__(name)
         self._velocity = None
         self._tolerance = None
 
     def init(self):
         """Initialise tolerance property"""
-        AbstractActuator.init(self)
+        super().init()
         self._tolerance = self.get_property("tolerance") or 1e-3
 
     def get_velocity(self):
@@ -101,7 +102,6 @@ class AbstractMotor(AbstractActuator):
         Args:
             value (float): value
         """
-
         if value is None:
             value = self.get_value()
 

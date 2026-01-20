@@ -18,29 +18,40 @@
 #  You should have received a copy of the GNU General Lesser Public License
 #  along with MXCuBE. If not, see <http://www.gnu.org/licenses/>.
 
-"""Abstract Transmission
-Set the unit as [%] and the limits to 0-100.
-"""
 
 import abc
 
-from mxcubecore.HardwareObjects.abstract.AbstractActuator import AbstractActuator
+from mxcubecore.BaseHardwareObjects import HardwareObject
 
 __copyright__ = """ Copyright © 2010- 2022 by the MXCuBE collaboration """
 __license__ = "LGPLv3+"
 
 
-class AbstractTransmission(AbstractActuator):
-    """Abstract Transmission
-
-    The value of the transmission is in % (float or int).
-    If the transmission has no continuous values,
-    beamlines should provide the nearest achievable one"""
-
-    unit = "%"
-
+class AbstractAuthenticator(HardwareObject):
     __metaclass__ = abc.ABCMeta
 
-    def init(self):
+    def init(self) -> None:
         super().init()
-        self.update_limits((0, 100))
+
+    @abc.abstractmethod
+    def authenticate(self, username: str, password: str) -> bool:
+        """
+        Authenticate with credentials username, password
+
+        Args:
+            username: username
+            password: password
+
+        Returns:
+            True on success otherwise false
+        """
+        pass
+
+    @abc.abstractmethod
+    def invalidate(username: str) -> None:
+        """
+        de-authetnicate user with <username>
+
+        Args:
+            username: username
+        """
