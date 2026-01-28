@@ -11,8 +11,13 @@ from typing import (
 )
 from urllib.error import URLError
 
-from suds import WebFault
-from suds.client import Client
+from collections import namedtuple
+from zeep import Client
+from zeep.transports import Transport
+from zeep.helpers import serialize_object
+
+from requests.auth import HTTPBasicAuth
+from zeep.exceptions import Fault
 from suds.sudsobject import asdict
 
 from mxcubecore.HardwareObjects.abstract.ISPyBValueFactory import ISPyBValueFactory
@@ -22,6 +27,25 @@ from mxcubecore.model.lims_session import (
     Session,
 )
 from mxcubecore.utils.conversion import string_types
+
+_WSDL_ROOT = ""
+_WS_BL_SAMPLE_URL = _WSDL_ROOT + 'ToolsForBLSampleWebService?wsdl'
+_WS_SHIPPING_URL = _WSDL_ROOT + 'ToolsForShippingWebService?wsdl'
+_WS_COLLECTION_URL = _WSDL_ROOT + 'ToolsForCollectionWebService?wsdl'
+_WS_AUTOPROC_URL = _WSDL_ROOT + 'ToolsForAutoprocessingWebService?wsdl'
+_WS_USERNAME = None
+_WS_PASSWORD = None
+
+_CONNECTION_ERROR_MSG = "Could not connect to ISPyB, please verify that " + \
+                        "the server is running and that your " + \
+                        "configuration is correct"
+
+
+SampleReference = namedtuple('SampleReference', ['code',
+                                                 'container_reference',
+                                                 'sample_reference',
+                                                 'container_code'])
+
 
 suds_encode = str.encode
 
@@ -39,7 +63,7 @@ def utf_encode(res_d):
             # on Python version
             res_d[key] = suds_encode("utf8", "ignore")
         except Exception:
-            # If not primitive or Text data, complex type, try to convert to
+            # If not primitive or Text data, complext type, try to convert to
             # dict or str if the first fails
             try:
                 res_d[key] = utf_encode(asdict(value))
@@ -59,69 +83,89 @@ def utf_decode(res_d):
         try:
             res_d[key] = value.decode("utf8", "ignore")
         except Exception:
-            logging.getLogger("HWR").exception("")
+            pass
 
     return res_d
 
 
-class ISPyBDataAdapter:
+class ISPyBDataAdapter():
     def __init__(
         self,
         ws_root: str,
-        proxy: dict,
+        #proxy: dict,
         ws_username: str,
         ws_password: str,
         beamline_name: str,
     ):
-        self.ws_root = ws_root
-        self.ws_username = ws_username
-        self.ws_password = ws_password
-        self.proxy = proxy  # type: ignore
-        self.beamline_name = beamline_name
+       self.ws_root =  ws_root
+       self.ws_username = ws_username
+       self.ws_password = ws_password
+       self.beamline_name = beamline_name
+       self._shipping = None
+       self._collection = None
+       self._tools_ws = None
+       self._autoproc_ws = None
 
-        # the duration of the session in days for the ones that are created by MXCuBE
-        self.new_sesssion_duration_days = 2
+    def configure_urls(self):
 
-        self.logger = logging.getLogger("ispyb_adapter")
+        if self.ws_root:
+            global _WSDL_ROOT
+            global _WS_BL_SAMPLE_URL
+            global _WS_SHIPPING_URL
+            global _WS_COLLECTION_URL
+            global _WS_AUTOPROC_URL
+            _WSDL_ROOT = self.ws_root.strip()
+            _WS_BL_SAMPLE_URL = _WSDL_ROOT + 'ToolsForBLSampleWebService?wsdl'
+            _WS_SHIPPING_URL = _WSDL_ROOT + 'ToolsForShippingWebService?wsdl'
+            _WS_COLLECTION_URL = _WSDL_ROOT + 'ToolsForCollectionWebService?wsdl'
+            _WS_AUTOPROC_URL = _WSDL_ROOT + 'ToolsForAutoprocessingWebService?wsdl'
 
-        self._shipping = self.__create_client(
-            self.ws_root + "ToolsForShippingWebService?wsdl"
-        )
-        self._collection = self.__create_client(
-            self.ws_root + "ToolsForCollectionWebService?wsdl"
-        )
-        self._tools_ws = self.__create_client(
-            self.ws_root + "ToolsForBLSampleWebService?wsdl"
-        )
 
-    def __create_client(self, url: str):
-        """
-        Given a url it will create
-        """
-        if self.ws_root.strip().startswith("https://"):
-            from suds.transport.https import HttpAuthenticated
-        else:
-            from suds.transport.http import HttpAuthenticated
 
-        client = Client(
-            url,
-            timeout=3,
-            transport=HttpAuthenticated(
-                username=self.ws_username,  # type: ignore
-                password=self.ws_password,
-                proxy=self.proxy,
-            ),
-            cache=None,
-            proxy=self.proxy,
-        )
-        client.set_options(cache=None, location=url)
-        return client
+    def _create_client(self, url, service_name):
+        """Create a zeep Client with authentication and timeout"""
+        from requests import Session
+        session = Session()
+        session.auth = HTTPBasicAuth(self.ws_username, self.ws_password)
 
-    def isEnabled(self) -> object:
-        return self._shipping  # type: ignore
+        # Configure transport with timeout and session
+        transport = Transport(session=session, timeout=5)
+
+        try:
+            client = Client(url, transport=transport)
+            return client
+        except Exception as e:
+            logging.getLogger("ispyb_client").exception(
+                f"Failed to connect to {service_name}: {str(e)}"
+            )
+            return None
+
+
+    def initialize_services(self):
+        self.configure_urls()
+        """Initialize all web service connections"""
+        try:
+            self._shipping = self._create_client(_WS_SHIPPING_URL, "shipping")
+            self._collection = self._create_client(_WS_COLLECTION_URL, "collection")
+            self._tools_ws = self._create_client(_WS_BL_SAMPLE_URL, "tools")
+            self._autoproc_ws = self._create_client(_WS_AUTOPROC_URL, "autoproc")
+            # Check if any service failed to initialize
+            if not all([self._shipping, self._collection, self._tools_ws, self._autoproc_ws]):
+                raise URLError("One or more services failed to initialize")
+            return True
+
+        except URLError:
+            logging.getLogger("ispyb_client").exception(_CONNECTION_ERROR_MSG)
+            return False
+        except Exception as e:
+            logging.getLogger("ispyb_client").exception(
+                f"Unexpected error during service initialization: {str(e)}"
+            )
+            return False
 
     def create_session(self, proposal_id: str, beamline_name: str) -> Session:
         try:
+            # proposal = self.find_proposal_by_login_and_beamline(self.get_user_, beamline_name)  # type: ignore
             current_time = time.localtime()
             start_time = time.strftime("%Y-%m-%d 00:00:00", current_time)
             end_time = (
@@ -137,10 +181,12 @@ class ISPyBDataAdapter:
             session["scheduled"] = 0
             session["nbShifts"] = 3
             session["comments"] = "Session created by the BCM"
+            current_time = datetime.now()
             session["startDate"] = datetime.strptime(start_time, "%Y-%m-%d %H:%M:%S")
             session["endDate"] = datetime.strptime(end_time, "%Y-%m-%d %H:%M:%S")
 
             # return data to original codification
+            # logging.getLogger("ispyb_client").info("Session creation: %s" % session)
             session_id = self._collection.service.storeOrUpdateSession(
                 utf_decode(session)
             )
@@ -250,7 +296,6 @@ class ISPyBDataAdapter:
             response = self._shipping.service.findProposalByLoginAndBeamline(
                 username, beamline_name
             )
-            print(response)
             if response is None:
                 return []
 
@@ -290,6 +335,7 @@ class ISPyBDataAdapter:
         self, code: str, number: str, beamline_name: str
     ) -> LimsSessionManager:
         try:
+            self.initialize_services()
             self._debug(
                 "get_sessions_by_code_and_number. code=%s number=%s beamline_name=%s"
                 % (code, number, beamline_name)
@@ -298,15 +344,18 @@ class ISPyBDataAdapter:
                 code, number, beamline_name
             )
             return LimsSessionManager(sessions=sessions)
-        except WebFault as e:
+
+        except Fault as e:
             self._exception(str(e))
             raise e
 
+
     def get_person_by_username(self, username: str) -> Dict:
+
         try:
             person = self._shipping.service.findPersonByLogin(username)
             return asdict(person)
-        except WebFault as e:
+        except Fault as e:
             self._error(str(e))
 
         return {}
@@ -327,7 +376,7 @@ class ISPyBDataAdapter:
             return LimsSessionManager(
                 sessions=sessions,
             )
-        except WebFault as e:
+        except Fault as e:
             self._exception(str(e))
         return LimsSessionManager()
 
@@ -337,9 +386,17 @@ class ISPyBDataAdapter:
 
     def store_data_collection_group(self, mx_collection):
         group_id = None
+        # logging.getLogger("HWR").debug(
+        #    "ispyb_group_data_collections: %s"
+        #    % mx_collection["ispyb_group_data_collections"]
+        # )
+
         if mx_collection["ispyb_group_data_collections"]:
             group_id = mx_collection.get("group_id", None)
-
+        # logging.getLogger("HWR").debug(
+        #    "Storing data collection group in lims. data to store. group_id: %s mx_collection: %s"
+        #    % (str(group_id), str(mx_collection))
+        # )
         # Create a new group id
         group = ISPyBValueFactory().dcg_from_dc_params(self._collection, mx_collection)
         # if group_id is None:
@@ -347,6 +404,7 @@ class ISPyBDataAdapter:
         mx_collection["group_id"] = group_id
 
     def _update_data_collection(self, mx_collection):
+        mx_collection["collection_id"] = None
         if "collection_id" in mx_collection:
             try:
                 # Update the data collection group
@@ -354,8 +412,8 @@ class ISPyBDataAdapter:
                 data_collection = ISPyBValueFactory().from_data_collect_parameters(
                     self._collection, mx_collection
                 )
-                self._collection.service.storeOrUpdateDataCollection(data_collection)
-            except WebFault as e:
+                mx_collection["collection_id"] = self._collection.service.storeOrUpdateDataCollection(data_collection)
+            except Fault as e:
                 logging.getLogger("ispyb_client").exception(e)
             except URLError as e:
                 logging.getLogger("ispyb_client").exception(e)
@@ -368,30 +426,17 @@ class ISPyBDataAdapter:
         return (0, 0)
 
     def store_image(self, image_dict):
+
         if self._collection:
             logging.getLogger("HWR").debug("Storing image in lims")
             if "dataCollectionId" in image_dict:
                 try:
-                    # Possible fields of ISPYB storeOrUpdateImage method are:
-                    #  comments (str): additional comments,
-                    #  cumulativeIntensity (float): image cumulative intensity value,
-                    #  dataCollectionId (int): collection id,
-                    #  fileName (str): name of the master file (.h5),
-                    #  fileLocation (str): location of the master file,
-                    #  imageId (str | None): if None the new id will be created,
-                    #  imageNumber (int): number of frames,
-                    #  jpegFileFullPath (str): path to jpeg file,
-                    #  jpegThumbnailFileFullPath (str): path to jpeg thumbnail file,
-                    #  machineMessage: the operator message from the machine,
-                    #  measuredIntensity (float): measured flux value,
-                    #  synchrotronCurrent (float | str): machine current,
-                    #  temperature (float): temperature of the cryo system
                     image_id = self._collection.service.storeOrUpdateImage(image_dict)
                     logging.getLogger("HWR").debug(
                         "  - storing image in lims ok. id : %s" % image_id
                     )
                     return image_id
-                except WebFault:
+                except Fault:
                     logging.getLogger("ispyb_client").exception(
                         "ISPyBClient: exception in store_image"
                     )
@@ -421,7 +466,7 @@ class ISPyBDataAdapter:
                     utf_encode(asdict(sample)) for sample in response_samples
                 ]
 
-            except WebFault as e:
+            except Fault as e:
                 logging.getLogger("ispyb_client").exception(str(e))
             except URLError as e:
                 logging.getLogger("ispyb_client").exception(e)
@@ -445,10 +490,12 @@ class ISPyBDataAdapter:
             )
             robot_action_vo.dewarLocation = robot_action_dict.get("dewarLocation")
 
+            # robot_action_vo.endTime = robot_action_dict.get("endTime")
             robot_action_vo.message = robot_action_dict.get("message")
             robot_action_vo.sampleBarcode = robot_action_dict.get("sampleBarcode")
             robot_action_vo.sessionId = robot_action_dict.get("sessionId")
             robot_action_vo.blSampleId = robot_action_dict.get("sampleId")
+            logging.getLogger("HWR").info(robot_action_vo.blSampleId)
             robot_action_vo.startTime = datetime.strptime(
                 robot_action_dict.get("startTime"), "%Y-%m-%d %H:%M:%S"
             )
@@ -499,7 +546,7 @@ class ISPyBDataAdapter:
                     "", manufacturer, model, mode
                 )
                 return res
-            except WebFault:
+            except Fault:
                 logging.getLogger("ispyb_client").exception(
                     "ISPyBClient: exception in find_detector"
                 )
@@ -511,8 +558,7 @@ class ISPyBDataAdapter:
     def update_session(self, session_dict):
         if self._collection:
             try:
-                print(session_dict)
-                # The old API used date formatted strings and the new
+                # The old API used date formated strings and the new
                 # one uses DateTime objects.
                 session_dict["startDate"] = datetime.strptime(
                     session_dict["startDate"], "%Y-%m-%d %H:%M:%S"
@@ -529,7 +575,7 @@ class ISPyBDataAdapter:
                         session_dict["timeStamp"].split("+")[0], "%Y-%m-%d %H:%M:%S"
                     )
                 except Exception:
-                    logging.getLogger("HWR").exception("")
+                    pass
 
                 # return data to original codification
                 decoded_dict = utf_decode(session_dict)
@@ -537,6 +583,7 @@ class ISPyBDataAdapter:
 
                 # changing back to string representation of the dates,
                 # since the session_dict is used after this method is called,
+
                 session_dict["startDate"] = datetime.strftime(
                     session_dict["startDate"], "%Y-%m-%d %H:%M:%S"
                 )
@@ -544,12 +591,15 @@ class ISPyBDataAdapter:
                     session_dict["endDate"], "%Y-%m-%d %H:%M:%S"
                 )
 
-            except WebFault as e:
+            except Fault as e:
                 session = {}
                 logging.getLogger("ispyb_client").exception(str(e))
             except URLError:
                 logging.getLogger("ispyb_client").exception(_CONNECTION_ERROR_MSG)
 
+            # logging.getLogger("ispyb_client").info(
+            #    "[ISPYB] Session goona be created: session_dict %s" % session_dict
+            # )
             logging.getLogger("ispyb_client").info(
                 "[ISPYB] Session created: %s" % session
             )
@@ -572,15 +622,17 @@ class ISPyBDataAdapter:
                 )
             else:
                 if session is not None:
+
                     try:
                         blSetupId = self._collection.service.storeOrUpdateBeamLineSetup(
                             bl_config
                         )
-
                         session["beamLineSetupId"] = blSetupId
                         self.update_session(session)
 
-                    except WebFault as e:
+                    except Fault as e:
+                        print("------------Enter to FAULT")
+                        logging.getLogger('zeep').setLevel(logging.DEBUG)
                         logging.getLogger("ispyb_client").exception(str(e))
                     except URLError:
                         logging.getLogger("ispyb_client").exception(
@@ -609,15 +661,12 @@ class ISPyBDataAdapter:
         data_collection = ISPyBValueFactory().from_data_collect_parameters(
             self._collection, mx_collection
         )
-
         detector_id = 0
         if bl_config:
             lims_beamline_setup = ISPyBValueFactory.from_bl_config(
                 self._collection, bl_config
             )
-
             lims_beamline_setup.synchrotronMode = data_collection.synchrotronMode
-
             self.store_beamline_setup(mx_collection["sessionId"], lims_beamline_setup)
 
             detector_params = ISPyBValueFactory().detector_from_blc(
@@ -652,7 +701,7 @@ class ISPyBDataAdapter:
                 session.endDate = datetime.strftime(
                     session.endDate, "%Y-%m-%d %H:%M:%S"
                 )
-                return utf_encode(asdict(session))
+                return vars(session)
         except Exception as e:
             logging.getLogger("ispyb_client").exception(e)
 
@@ -673,7 +722,7 @@ class ISPyBDataAdapter:
             try:
                 del energyscan_dict["remoteEnergy"]
             except KeyError:
-                logging.getLogger("HWR").exception("")
+                pass
 
             status["energyScanId"] = self._collection.service.storeOrUpdateEnergyScan(
                 energyscan_dict
@@ -711,13 +760,13 @@ class ISPyBDataAdapter:
         return status
 
     def update_bl_sample(self, bl_sample):
-        if self._disabled:
-            return {}
+        #if self._disabled:
+        #    return {}
 
         if self._tools_ws:
             try:
                 status = self._tools_ws.service.storeOrUpdateBLSample(bl_sample)
-            except WebFault as e:
+            except Fault as e:
                 logging.getLogger("ispyb_client").exception(str(e))
                 status = {}
             except URLError:

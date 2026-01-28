@@ -21,6 +21,8 @@ import time
 
 import numpy as np
 from pkg_resources import resource_filename
+import pdb 
+pdb.set_trace()
 
 from mxcubecore.HardwareObjects.abstract.AbstractVideoDevice import AbstractVideoDevice
 from mxcubecore.utils.qt_import import (

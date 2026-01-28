@@ -85,7 +85,7 @@ from mxcubecore.HardwareObjects.GenericDiffractometer import (
 
 from mxcubecore.TaskUtils import task
 from mxcubecore import HardwareRepository as HWR
-from mxcubecore.utils import qt_import
+#from mxcubecore.utils import qt_import
 
 __credits__ = ["SOLEIL"]
 __version__ = "2.3."
@@ -1616,13 +1616,13 @@ class PX2Diffractometer(GenericDiffractometer):
         logging.getLogger("user_level_log").info("X-ray centring finished successfully")
         logging.getLogger("user_level_log").info("Sample moved to optimal position")
         logging.getLogger("user_level_log").info("You may proceed with data collection")
-        if parent is not None:
-            qt_import.QMessageBox.warning(
-                parent,
-                "Success!",
-                "X-ray centring finished successfully\nSample moved to optimal position.\nYou may proceed with data collection",
-                qt_import.QMessageBox.Ok,
-            )
+        # if parent is not None:
+        #    qt_import.QMessageBox.warning(
+        #        parent,
+        #        "Success!",
+        #        "X-ray centring finished successfully\nSample moved to optimal position.\nYou may proceed with data collection",
+        #        qt_import.QMessageBox.Ok,
+        #    )
 
         result_position = experiment.get_result_position()
         translated_position = self.translate_from_md_to_mxcube(result_position)

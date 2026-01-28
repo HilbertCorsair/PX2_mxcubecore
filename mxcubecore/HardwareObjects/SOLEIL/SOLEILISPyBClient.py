@@ -1,5 +1,8 @@
 import logging
 import os
+import pdb
+pdb.set_trace()
+
 try:
     import urllib2 as urllib
 except ImportError:

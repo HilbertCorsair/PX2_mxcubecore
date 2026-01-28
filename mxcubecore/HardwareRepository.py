@@ -139,7 +139,11 @@ def load_from_yaml(
                 raise ValueError("%s file lacks  'class' tag" % configuration_file)
 
     if not msg0:
-        module_name, class_name = class_import.rsplit(".", 1)
+        if "." in class_import :
+            module_name, class_name = class_import.rsplit(".", 1)
+            print(f"imported: {class_import}")
+        else : 
+            module_name , class_name = (class_import, class_import)
         # For "a.b.c" equivalent to absolute import of "from a.b import c"
         try:
             cls = getattr(importlib.import_module(module_name),class_name)

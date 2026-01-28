@@ -72,6 +72,10 @@ import logging
 import os
 import sys
 
+import pdb 
+pdb.set_trace()
+
+
 qt_imported = False
 qt_variant = None
 qt_version_no = []

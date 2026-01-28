@@ -2,7 +2,7 @@ import os
 import time
 import logging
 import re
-from Session import Session
+from mxcubecore.HardwareObjects.Session import Session
 
 class SOLEILSession(Session):
 

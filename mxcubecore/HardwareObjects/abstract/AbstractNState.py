@@ -87,7 +87,8 @@ class AbstractNState(AbstractActuator):
     def initialise_values(self):
         """Initialise the ValueEnum with the values from the config."""
         try:
-            values = ast.literal_eval(self.get_property("values"))
+            #Temporary hack
+            values = {"ON" : "ON", "OFF": "OFF" }#ast.literal_eval(self.get_property("values"))
             values_dict = dict(**{item.name: item.value for item in self.VALUES})
             values_dict.update(values)
             self.VALUES = Enum("ValueEnum", values_dict)
