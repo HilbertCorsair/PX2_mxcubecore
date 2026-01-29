@@ -16,7 +16,7 @@ except ModuleNotFoundError:
 from suds.transport.http import HttpAuthenticated
 from suds.client import Client
 
-from ISPyBClient import ISPyBClient, _CONNECTION_ERROR_MSG
+from mxcubecore.HardwareObjects.PyISPyBClient import PyISPyBClient #ISPyBClient import ISPyBClient, _CONNECTION_ERROR_MSG
 import traceback
 from collections import namedtuple
 from mxcubecore import HardwareRepository as HWR
@@ -100,11 +100,12 @@ class SOLEILISPyBClient(ISPyBClient):
                         "extracted from ISPyB values for shipping, collection and tools"
                     )
                 except Exception:
-                    logging.exception("%s" % _CONNECTION_ERROR_MSG)
+                    print("ERROR in SOLEILISPyBClient.init : did not work")
+                    #logging.exception("%s" % _CONNECTION_ERROR_MSG)
                     return
         except Exception:
             print(traceback.print_exc())
-            logging.getLogger("HWR").exception(_CONNECTION_ERROR_MSG)
+            #logging.getLogger("HWR").exception(_CONNECTION_ERROR_MSG)
             return
         try:
             proposals = HWR.beamline.session["proposals"]
