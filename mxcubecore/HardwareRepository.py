@@ -146,7 +146,26 @@ def load_from_yaml(
             module_name , class_name = (class_import, class_import)
         # For "a.b.c" equivalent to absolute import of "from a.b import c"
         try:
-            cls = getattr(importlib.import_module(module_name),class_name)
+            mod = importlib.import_module(module_name)
+            cls = getattr(mod, class_name)
+        except AttributeError:
+            # Class may live in a submodule (e.g. SOLEIL.SOLEILSession in
+            # SOLEIL/SOLEILSession.py) when the package __init__.py does not
+            # export it.
+            try:
+                submod_name = module_name + "." + class_name
+                mod = importlib.import_module(submod_name)
+                cls = getattr(mod, class_name)
+            except Exception:
+                if _container:
+                    msg0 = "Error importing class"
+                    class_name = class_import
+                    print(
+                        "Encountered Exception (continuing):\n%s"
+                        % traceback.format_exc()
+                    )
+                else:
+                    raise
         except Exception as ex:
             if _container:
                 msg0 = "Error importing class"
