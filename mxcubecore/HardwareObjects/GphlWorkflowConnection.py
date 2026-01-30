@@ -33,7 +33,11 @@ import sys
 
 from py4j import clientserver, java_gateway
 
-from mxcubecore import ConvertUtils
+from mxcubecore.utils.conversion import (
+    command_option,
+    java_property,
+    text_type,
+)
 from mxcubecore.HardwareObjects import GphlMessages
 
 from mxcubecore.BaseHardwareObjects import HardwareObject
@@ -250,7 +254,7 @@ class GphlWorkflowConnection(HardwareObject, object):
 
         for tag, val in sorted(params.get("invocation_properties", {}).items()):
             command_list.extend(
-                ConvertUtils.java_property(tag, val, quote_value=in_shell)
+                java_property(tag, val, quote_value=in_shell)
             )
 
         # We must get hold of the options here, as we need wdir for a property
@@ -283,12 +287,12 @@ class GphlWorkflowConnection(HardwareObject, object):
 
         # Hardcoded - location for log output
         command_list.extend(
-            ConvertUtils.java_property(
+            java_property(
                 "co.gphl.wf.wdir", workflow_options["wdir"], quote_value=in_shell
             )
         )
 
-        ll0 = ConvertUtils.command_option(
+        ll0 = command_option(
             "cp", self.software_paths["gphl_java_classpath"], quote_value=in_shell
         )
         command_list.extend(ll0)
@@ -297,16 +301,16 @@ class GphlWorkflowConnection(HardwareObject, object):
 
         for keyword, value in params.get("properties", {}).items():
             command_list.extend(
-                ConvertUtils.java_property(keyword, value, quote_value=in_shell)
+                java_property(keyword, value, quote_value=in_shell)
             )
         for keyword, value in self.java_properties.items():
             command_list.extend(
-                ConvertUtils.java_property(keyword, value, quote_value=in_shell)
+                java_property(keyword, value, quote_value=in_shell)
             )
 
         for keyword, value in workflow_options.items():
             command_list.extend(
-                ConvertUtils.command_option(keyword, value, quote_value=in_shell)
+                command_option(keyword, value, quote_value=in_shell)
             )
         #
         wdir = workflow_options.get("wdir")
@@ -709,7 +713,6 @@ class GphlWorkflowConnection(HardwareObject, object):
         strategy = self._GeometricStrategy_to_python(
             py4jCollectionProposal.getStrategy()
         )
-        text_type = ConvertUtils.text_type
         id2Sweep = dict((text_type(x.id_), x) for x in strategy.sweeps)
         scans = []
         for py4jScan in py4jCollectionProposal.getScans():
@@ -1035,7 +1038,7 @@ class GphlWorkflowConnection(HardwareObject, object):
         jvm = self._gateway.jvm
         buildr = jvm.astra.messagebus.messages.information.PriorInformationImpl.Builder(
             jvm.java.util.UUID.fromString(
-                ConvertUtils.text_type(priorInformation.sampleId)
+                text_type(priorInformation.sampleId)
             )
         )
         xx0 = priorInformation.sampleName
@@ -1082,7 +1085,7 @@ class GphlWorkflowConnection(HardwareObject, object):
     def _CollectionDone_to_java(self, collectionDone):
         jvm = self._gateway.jvm
         proposalId = jvm.java.util.UUID.fromString(
-            ConvertUtils.text_type(collectionDone.proposalId)
+            text_type(collectionDone.proposalId)
         )
         return jvm.astra.messagebus.messages.information.CollectionDoneImpl(
             proposalId,
@@ -1187,7 +1190,7 @@ class GphlWorkflowConnection(HardwareObject, object):
             return None
 
         javaUuid = self._gateway.jvm.java.util.UUID.fromString(
-            ConvertUtils.text_type(phasingWavelength.id_)
+            text_type(phasingWavelength.id_)
         )
         return jvm.astra.messagebus.messages.information.PhasingWavelengthImpl(
             javaUuid, float(phasingWavelength.wavelength), phasingWavelength.role
@@ -1209,7 +1212,7 @@ class GphlWorkflowConnection(HardwareObject, object):
             ((x, float(y)) for x, y in bcsDetectorSetting.axisSettings.items())
         )
         javaUuid = jvm.java.util.UUID.fromString(
-            ConvertUtils.text_type(bcsDetectorSetting.id_)
+            text_type(bcsDetectorSetting.id_)
         )
         return jvm.astra.messagebus.messages.instrumentation.BcsDetectorSettingImpl(
             float(bcsDetectorSetting.resolution), orgxy_array, axisSettings, javaUuid
@@ -1222,9 +1225,9 @@ class GphlWorkflowConnection(HardwareObject, object):
             return None
 
         gts = goniostatTranslation
-        javaUuid = jvm.java.util.UUID.fromString(ConvertUtils.text_type(gts.id_))
+        javaUuid = jvm.java.util.UUID.fromString(text_type(gts.id_))
         javaRotationId = jvm.java.util.UUID.fromString(
-            ConvertUtils.text_type(gts.requestedRotationId)
+            text_type(gts.requestedRotationId)
         )
         axisSettings = dict(((x, float(y)) for x, y in gts.axisSettings.items()))
         newRotation = gts.newRotation
@@ -1249,7 +1252,7 @@ class GphlWorkflowConnection(HardwareObject, object):
             return None
 
         grs = goniostatRotation
-        javaUuid = jvm.java.util.UUID.fromString(ConvertUtils.text_type(grs.id_))
+        javaUuid = jvm.java.util.UUID.fromString(text_type(grs.id_))
         axisSettings = dict(((x, float(y)) for x, y in grs.axisSettings.items()))
         # Long problematic, but now fixed (on both sides)
         return jvm.astra.messagebus.messages.instrumentation.GoniostatRotationImpl(
@@ -1265,7 +1268,7 @@ class GphlWorkflowConnection(HardwareObject, object):
             return None
 
         gss = goniostatSweepSetting
-        javaUuid = jvm.java.util.UUID.fromString(ConvertUtils.text_type(gss.id_))
+        javaUuid = jvm.java.util.UUID.fromString(text_type(gss.id_))
         axisSettings = dict(((x, float(y)) for x, y in gss.axisSettings.items()))
         return jvm.astra.messagebus.messages.instrumentation.GoniostatSweepSettingImpl(
             axisSettings, javaUuid, goniostatSweepSetting.scanAxis
@@ -1278,7 +1281,7 @@ class GphlWorkflowConnection(HardwareObject, object):
             return None
 
         javaUuid = jvm.java.util.UUID.fromString(
-            ConvertUtils.text_type(beamStopSetting.id_)
+            text_type(beamStopSetting.id_)
         )
         axisSettings = dict(
             ((x, float(y)) for x, y in beamStopSetting.axisSettings.items())
