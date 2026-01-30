@@ -41,7 +41,7 @@ import f90nml
 
 
 from mxcubecore.dispatcher import dispatcher
-from mxcubecore import ConvertUtils
+from mxcubecore.utils.conversion import text_type
 from mxcubecore.BaseHardwareObjects import HardwareObject
 from mxcubecore.HardwareObjects import queue_model_objects
 from mxcubecore.HardwareObjects import queue_model_enumerables
@@ -981,7 +981,6 @@ class GphlWorkflow(HardwareObject): #, speech):
 
         # Set beam_energies to match parameters
         # get wavelengths
-        h_over_e = ConvertUtils.H_OVER_E
         beam_energies = parameters.pop("beam_energies")
         wavelengths = list(
             GphlMessages.PhasingWavelength(
@@ -1757,7 +1756,7 @@ class GphlWorkflow(HardwareObject): #, speech):
         )
         kwArgs["strategyDetectorSetting"] = detectorSetting
 
-        ll0 = ConvertUtils.text_type(params["_cplx"][0]).split()
+        ll0 = text_type(params["_cplx"][0]).split()
         if ll0[0] == "*":
             del ll0[0]
 
