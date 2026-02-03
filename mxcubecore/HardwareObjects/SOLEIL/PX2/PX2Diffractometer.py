@@ -116,11 +116,14 @@ class PX2Diffractometer(GenericDiffractometer):
         ("beam_y", "beam_y"),
     ]
 
-    def __init__(self, *args):
+    def __init__(self, *args, name=None, **kwargs):
         """
         Description:
         """
-        GenericDiffractometer.__init__(self, *args)
+        if name is not None:
+            GenericDiffractometer.__init__(self, name)
+        else:
+            GenericDiffractometer.__init__(self, *args)
         # speech.__init__(self, port=5555, service="mxcube", verbose=True)
 
         # Hardware objects ----------------------------------------------------
