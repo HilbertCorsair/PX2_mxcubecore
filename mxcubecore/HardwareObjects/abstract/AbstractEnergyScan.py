@@ -15,8 +15,11 @@ class AbstractEnergyScan(HardwareObject):
 
     __metaclass__ = abc.ABCMeta
 
-    def __init__(self, name):
-        super().__init__(name)
+    def __init__(self, *args, name=None, **kwargs):
+        if name is not None:
+            super().__init__(name)
+        else:
+            super().__init__(*args)
         self.data_collect_task = None
         self._egyscan_task = None
         self.scanning = False
