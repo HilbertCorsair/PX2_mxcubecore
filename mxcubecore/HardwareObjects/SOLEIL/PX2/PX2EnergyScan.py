@@ -9,8 +9,11 @@ except ModuleNotFoundError:
     from experimental_methods import energy_scan
 
 class PX2EnergyScan(EnergyScanMockup):
-    def __init__(self, name):
-        EnergyScanMockup.__init__(self, name)
+    def __init__(self, *args, name=None, **kwargs):
+        if name is not None:
+            EnergyScanMockup.__init__(self, name)
+        else:
+            EnergyScanMockup.__init__(self, *args)
 
         self.log = logging.getLogger("user_level_log")
 
