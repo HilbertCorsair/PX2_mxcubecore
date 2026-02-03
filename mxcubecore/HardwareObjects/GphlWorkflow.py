@@ -1274,7 +1274,8 @@ class GphlWorkflow(HardwareObject): #, speech):
             logging.getLogger("HWR").debug(
                 "diffractcal file not present - using instrumentation.nml %s", fp0
             )
-        ll0 = diffractcal_data["gonio_axis_dirs"]
+        #ll0 = diffractcal_data["gonio_axis_dirs"]
+        ll0 = text_type(params["_cplx"][0]).split()
         recen_data["omega_axis"] = ll0[:3]
         recen_data["kappa_axis"] = ll0[3:6]
         recen_data["phi_axis"] = ll0[6:]
@@ -1556,7 +1557,6 @@ class GphlWorkflow(HardwareObject): #, speech):
         finally:
             dispatcher.send("gphlDoneAcquisition", self, gphl_workflow_model)
         self._data_collection_group = None
-
         if data_collection_entry.status == QUEUE_ENTRY_STATUS.FAILED:
             # TODO NBNB check if these status codes are corerct
             status = 1

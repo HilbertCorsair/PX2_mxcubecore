@@ -1,5 +1,5 @@
 #
-#  Project name: MXCuBE
+#  Project: MXCuBE
 #  https://github.com/mxcube
 #
 #  This file is part of MXCuBE software.
@@ -20,6 +20,7 @@
 """ """
 
 import abc
+import logging
 from datetime import datetime
 from typing import (
     Dict,
@@ -126,12 +127,13 @@ class AbstractLims(HardwareObject, abc.ABC):
         """
         raise Exception("Abstract class. Not implemented")
 
+    """
     def init(self) -> None:
-        """
-        Method inherited from baseclass
-        """
-        self.beamline_name = HWR.beamline.session.beamline_name
 
+        Method inherited from baseclass
+
+        self.beamline_name = HWR.beamline.session.beamline_name
+    """
     @abc.abstractmethod
     def get_proposals_by_user(self, login_id: str) -> List[Dict]:
         """
@@ -211,7 +213,7 @@ class AbstractLims(HardwareObject, abc.ABC):
             session_id: The session id that the beamline_setup should be
                         associated with.
 
-            bl_config_dict: The dictionary with beamline settings.
+            bl_config_dict: The dictonary with beamline settings.
 
         Returns:
             The id of the beamline setup.
@@ -224,7 +226,7 @@ class AbstractLims(HardwareObject, abc.ABC):
         Stores (image parameters) <image_dict>
 
         Args:
-            image_dict: A dictionary with image pramaters.
+            image_dict: A dictonary with image pramaters.
         """
         raise Exception("Abstract class. Not implemented")
 
@@ -237,7 +239,7 @@ class AbstractLims(HardwareObject, abc.ABC):
             energyscan_dict: Energyscan data to store.
 
         Returns:
-            Dictionary with the energy scan id {"energyScanId": int}
+            Dictonary with the energy scan id {"energyScanId": int}
         """
         raise Exception("Abstract class. Not implemented")
 
@@ -250,7 +252,7 @@ class AbstractLims(HardwareObject, abc.ABC):
             xfespectrum_dict: XFE scan data to store.
 
         Returns:
-            Dictionary with the XFE scan id {"xfeFluorescenceSpectrumId": int}
+            Dictonary with the XFE scan id {"xfeFluorescenceSpectrumId": int}
         """
         raise Exception("Abstract class. Not implemented")
 
@@ -301,22 +303,22 @@ class AbstractLims(HardwareObject, abc.ABC):
                 "start": float,
                 "range": float,
                 "overlap": float,
-                "number_of_images": float,
+                "number_of_imaages": float,
                 "start_image_number": float
                 "exposure_time", float,
                 "kappaStart": float,
                 "phiStart": float,
             }],
             "fileinfo:{
-                "directory": str,
+                "direcotry: str,
                 "prefix": str
                 "suffix": str,
                 "template: str,
                 "run_number" int
             }
             "status": str,
-            "collection_id": int,
-            "wavelength": float,
+            "collection_id: int,
+            "wavelenght: float,
             "resolution":{
                 "lower": float,
                 "upper": float
@@ -341,8 +343,8 @@ class AbstractLims(HardwareObject, abc.ABC):
             "xtalSnapshotFullPath2": str,
             "xtalSnapshotFullPath3": str,
             "xtalSnapshotFullPath4": str,
-            "centeringMethod": str,
-            "actualCenteringPosition" str
+            "centringMethod": str,
+            "actualCentringPosition" str
             "group_id: int,
             "detector_id": int,
             "screening_sub_wedge_id": int,
@@ -408,7 +410,7 @@ class AbstractLims(HardwareObject, abc.ABC):
         """
         Finalizes the collection with "collection_id", provided in datacollection_dict.
 
-        Structure of datacollection_dict as defined in store_data_collection above.
+        Strucure of datacollection_dict as defined in store_data_collection above.
 
         Args:
             datacollection_dict:
@@ -446,11 +448,11 @@ class AbstractLims(HardwareObject, abc.ABC):
 
     def __set_sessions(self, sessions: List[Session]):
         """
-        Sets the current lims session
+        Sets the curent lims session
         :param session: lims session value
         :return:
         """
-        self.log.debug(
+        logging.getLogger("HWR").debug(
             "%s sessions available for users %s"
             % (len(sessions), self.session_manager.users.keys())
         )
@@ -503,7 +505,7 @@ class AbstractLims(HardwareObject, abc.ABC):
     def remove_user(self, user_name: str):
         if user_name in self.session_manager.users:
             del self.session_manager.users[user_name]
-            self.log.debug("User %s has been removed" % user_name)
+            logging.getLogger("HWR").debug("User %s has been removed" % user_name)
             self.__set_sessions(self.get_shared_sessions())
 
     def add_user_and_shared_sessions(self, user_name: str, sessions: List[Session]):
@@ -515,7 +517,7 @@ class AbstractLims(HardwareObject, abc.ABC):
         self.session_manager.users[user_name] = LimsUser(
             user_name=user_name, sessions=sessions
         )
-        self.log.debug(
+        logging.getLogger("HWR").debug(
             "User added to session manager, user_name=%s sessions=%s"
             % (user_name, len(sessions))
         )

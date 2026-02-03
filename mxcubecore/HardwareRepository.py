@@ -183,6 +183,9 @@ def load_from_yaml(
             result = cls(name=role)
             result._hwobj_container = _container
         except Exception:
+           # import pdb 
+           # pdb.set_trace()
+
             if _container:
                 msg0 = "Error instantiating %s" % cls.__name__
                 print(
