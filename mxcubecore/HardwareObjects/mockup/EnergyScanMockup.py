@@ -165,9 +165,12 @@ chooch_graph_data = (
 
 
 class EnergyScanMockup(AbstractEnergyScan, HardwareObject):
-    def __init__(self, name):
+    def __init__(self, *args, name=None, **kwargs):
         AbstractEnergyScan.__init__(self)
-        HardwareObject.__init__(self, name)
+        if name is not None:
+            HardwareObject.__init__(self, name)
+        else:
+            HardwareObject.__init__(self, *args)
 
     def init(self):
 
