@@ -53,10 +53,11 @@ __license__ = "LGPLv3+"
 class PX2BeamlineActions(BeamlineActions):
     """Beam action commands"""
 
-    def __init__(self, *args):
-        super().__init__(*args)
+    def __init__(self,name,*args):
+        super().__init__(name, *args)
         self.ctrl_list = []
         self.hwobj_list = []
+
 
     def init(self):
         """Initialise the controller commands and the actuator object

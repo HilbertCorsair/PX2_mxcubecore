@@ -45,21 +45,20 @@ class TangoMotor(AbstractMotor):
         self.cmd_set_online = None
         self.latest_position = None
         self.auto_on = False
-        self.cmd_on = None
+        #self.cmd_on = None
         self.cmd_calibrate = None
-
         self.step_limits = None
 
     def init(self):
         """Connects to all Tango channels and commands"""
-        self.polling = self.get_property("polling", TangoMotor.default_polling)
-        self.actuator_name = self.get_property("actuator_name", self.name())
+        self.polling = self.get_property("interval", TangoMotor.default_polling)
+        self.actuator_name = self.get_property("actuator_name", self.name)
         self._tolerance = self.get_property("tolerance", 1e-3)
 
         self.is_simulation = self.get_property("simulation", False)
         self.auto_on = self.get_property("auto_on", False)
         if self.auto_on:
-            self.log.debug("AUTO_ON is set for motor %s" % self.name())
+            self.log.debug("AUTO_ON is set for motor %s" % self.name)
 
         if self.is_simulation:
             self.simulated_pos = 0.0
@@ -104,9 +103,9 @@ class TangoMotor(AbstractMotor):
         else:
             try:
                 if self.get_property("default_limits"):
-                    self.update_limits(eval(self.get_property("default_limits")))
-            except Exception:
-                self.log.exception("")
+                    self.update_limits(self.get_property("default_limits"))
+            except Exception as e:
+                self.log.exception("e")
 
         self.cmd_stop = self.get_command_object("stopAxis")
         if self.cmd_stop is None:
@@ -119,16 +118,16 @@ class TangoMotor(AbstractMotor):
                 "Stop",
             )
 
-        self.cmd_on = self.get_command_object("onCmd")
-        if self.cmd_on is None:
-            self.cmd_on = self.add_command(
-                {
-                    "type": "tango",
-                    "name": "onCmd",
-                    "tangoname": self.tangoname,
-                },
-                "On",
-            )
+#        self.cmd_on = self.get_command_object("onCmd")
+#        if self.cmd_on is None:
+#            self.cmd_on = self.add_command(
+#                {
+#                    "type": "tango",
+#                    "name": "onCmd",
+#                    "tangoname": self.tangoname,
+#                },
+#                "On",
+#            )
 
         self.chan_velocity = self.get_channel_object("velocity", optional=True)
 

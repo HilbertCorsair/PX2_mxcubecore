@@ -664,9 +664,16 @@ class HardwareObjectMixin(CommandContainer):
 
         For ConfiguredObjects called after loading contained objects.
         """
-        self._exports_config_list.extend(
-            ast.literal_eval(self.get_property("exports", "[]").strip())
-        )
+        exps = self.get_property("exports")
+        if isinstance(exps, str):
+            self._exports_config_list.extend(
+                ast.literal_eval(exps, "[]").strip())
+        elif isinstance(exps, list):
+            self._exports_config_list.extend(exps)
+        elif exps : 
+            self._exports_config_list.extend([exp])
+           
+
         self._exports = dict.fromkeys(self._exports_config_list, {})
 
         # Add methods that are exported programmatically

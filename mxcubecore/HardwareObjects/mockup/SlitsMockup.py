@@ -29,8 +29,8 @@ class SlitsMockup(AbstractSlits):
 
     def init(self):
         self._value = [0.05, 0.05]
-        self._min_limits = [0.001, 0.001]
-        self._max_limits = [1, 1]
+        self._min_limits = ["0.001", "0.001"]
+        self._max_limits = ["1", "1"]
 
     def set_horizontal_gap(self, value):
         self._value[0] = value

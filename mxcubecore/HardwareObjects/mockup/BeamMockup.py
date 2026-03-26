@@ -38,8 +38,6 @@ Example xml configuration:
 __copyright__ = """ Copyright © by MXCuBE Collaboration """
 __license__ = "LGPLv3+"
 
-from ast import literal_eval
-
 from mxcubecore.HardwareObjects.abstract.AbstractBeam import AbstractBeam, BeamShape
 
 
@@ -53,6 +51,7 @@ class BeamMockup(AbstractBeam):
 
     def init(self):
         """Initialize hardware"""
+
         super().init()
 
         #
@@ -68,7 +67,7 @@ class BeamMockup(AbstractBeam):
         self._aperture = self.get_object_by_role("aperture")
         self._slits = self.get_object_by_role("slits")
         self._definer = self.get_object_by_role("definer")
-
+        
         if self.aperture:
             _definer_type = "aperture"
             self.aperture.connect("valueChanged", self.aperture_diameter_changed)
@@ -84,12 +83,8 @@ class BeamMockup(AbstractBeam):
         self._definer_type = self.get_property("definer_type", _definer_type)
 
         self._beam_position_on_screen = self.get_property("beam_position") or [318, 238]
-        if isinstance(self._beam_position_on_screen, str):
-            self._beam_position_on_screen = literal_eval(self._beam_position_on_screen)
 
         self._check_beam = self.get_property("check_beam") or False
-        if isinstance(self._check_beam, str):
-            self._check_beam = literal_eval(self._check_beam)
 
         # Needed to trigger first value setting
         self.get_value()
