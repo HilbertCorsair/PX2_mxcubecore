@@ -59,7 +59,7 @@ except ImportError:
         )
 
 from mxcubecore import HardwareRepository as HWR
-from mxcubecore.HardwareObjects.GenericDiffractometer import GenericDiffractometer
+from mxcubecore.HardwareObjects.abstract.AbstractDiffractometer import AbstractDiffractometer #GenericDiffractometer import GenericDiffractometer
 from mxcubecore.TaskUtils import task
 
 __credits__ = ["SOLEIL"]
@@ -67,7 +67,7 @@ __version__ = "2.3."
 __category__ = "General"
 
 
-class PX2Diffractometer(GenericDiffractometer):
+class PX2Diffractometer(AbstractDiffractometer):     #(GenericDiffractometer):
     """
     Description:
     """
@@ -87,11 +87,11 @@ class PX2Diffractometer(GenericDiffractometer):
         ("beam_y", "beam_y"),
     ]
 
-    def __init__(self, *args):
+    def __init__(self,name):
         """
         Description:
         """
-        GenericDiffractometer.__init__(self, *args)
+        super().__init__(name)
 
         # Hardware objects ----------------------------------------------------
         self.zoom_motor_hwobj = None
@@ -141,7 +141,10 @@ class PX2Diffractometer(GenericDiffractometer):
         """
         Description:
         """
-        GenericDiffractometer.init(self)
+        import pdb
+        pdb.set_trace()
+
+        AbstractDiffractometer.init(self)
         self.centring_status = {"valid": False}
 
         self.chan_state = self.get_channel_object("State")
