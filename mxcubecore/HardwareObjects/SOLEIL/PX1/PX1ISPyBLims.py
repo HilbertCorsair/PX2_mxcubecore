@@ -702,6 +702,9 @@ class PX1ISPyBLims(ProposalTypeISPyBLims):
         self.user_name = None
         self.session_manager = None
         self.samples_info_list = []
+        # Added to satisfy yaml loadind
+        self.session = None
+        self.ldapServer = None
 
     def init(self):
         self.beamline_name = "PROXIMA1"#self.get_property("beamline_name")

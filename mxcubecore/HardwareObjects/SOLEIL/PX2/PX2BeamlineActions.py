@@ -64,7 +64,7 @@ class PX2BeamlineActions(BeamlineActions):
         to be used.
         """
         print("-----------------Init PX2BeamlineActions")
-        try:
+        '''try:
             ctrl_cmds = self["controller_commands"].get_properties().items()
 
             if ctrl_cmds:
@@ -97,7 +97,7 @@ class PX2BeamlineActions(BeamlineActions):
                         print("----------------Dans except du second try hwobj_cmds")
                         pass
         except AttributeError:
-            pass
+            pass'''
     def SimulatedAction(self):
         print("This is a simulated method")
 

@@ -84,13 +84,7 @@ class PX2Collect(AbstractCollect, HardwareObject):
     def init(self):
         self.ready_event = gevent.event.Event()
 
-        undulators = []
-        try:
-            for undulator in self["undulators"]:
-                undulators.append(undulator)
-        except Exception:
-            self.log.exception("")
-
+        undulators = self.gegt_property("undulators", []) 
         beam_div_hor, beam_div_ver = HWR.beamline.beam.get_beam_divergence()
 
         self.set_beamline_configuration(
