@@ -141,9 +141,6 @@ class PX2Diffractometer(AbstractDiffractometer):     #(GenericDiffractometer):
         """
         Description:
         """
-        import pdb
-        pdb.set_trace()
-
         AbstractDiffractometer.init(self)
         self.centring_status = {"valid": False}
 
@@ -198,26 +195,26 @@ class PX2Diffractometer(AbstractDiffractometer):     #(GenericDiffractometer):
             self.zoom_motor_predefined_position_changed,
         )
 
-        self.connect(self.motor_hwobj_dict["phi"], "valueChanged", self.phi_motor_moved)
+        self.connect(self.motors_hwobj_dict["phi"], "valueChanged", self.phi_motor_moved)
         self.connect(
-            self.motor_hwobj_dict["phiy"], "valueChanged", self.phiy_motor_moved
+            self.motors_hwobj_dict["phiy"], "valueChanged", self.phiy_motor_moved
         )
         self.connect(
-            self.motor_hwobj_dict["phiz"], "valueChanged", self.phiz_motor_moved
+            self.motors_hwobj_dict["phiz"], "valueChanged", self.phiz_motor_moved
         )
         self.connect(
-            self.motor_hwobj_dict["kappa"], "valueChanged", self.kappa_motor_moved
+            self.motors_hwobj_dict["kappa"], "valueChanged", self.kappa_motor_moved
         )
         self.connect(
-            self.motor_hwobj_dict["kappa_phi"],
+            self.motors_hwobj_dict["kappa_phi"],
             "valueChanged",
             self.kappa_phi_motor_moved,
         )
         self.connect(
-            self.motor_hwobj_dict["sampx"], "valueChanged", self.sampx_motor_moved
+            self.motors_hwobj_dict["sampx"], "valueChanged", self.sampx_motor_moved
         )
         self.connect(
-            self.motor_hwobj_dict["sampy"], "valueChanged", self.sampy_motor_moved
+            self.motors_hwobj_dict["sampy"], "valueChanged", self.sampy_motor_moved
         )
 
         self.omega_reference_par = eval(self.get_property("omega_reference"))
@@ -910,19 +907,19 @@ class PX2Diffractometer(AbstractDiffractometer):     #(GenericDiffractometer):
             for key in c:
                 if c[key] is None:
                     try:
-                        c[key] = self.motor_hwobj_dict[key].get_value()
+                        c[key] = self.motors_hwobj_dict[key].get_value()
                     except Exception:
                         # self.log.info('motor_positions_to_screen exception key %s' % key)
                         self.log.exception("")
 
             if "kappa" in c and c["kappa"] is None:
-                kappa = self.motor_hwobj_dict["kappa"].get_value()
+                kappa = self.motors_hwobj_dict["kappa"].get_value()
                 c["kappa"] = kappa
             else:
                 c["kappa"] = self.goniometer.get_kappa_position()
 
             if "kappa_phi" in c and c["kappa_phi"] is None:
-                phi = self.motor_hwobj_dict["kappa_phi"].get_value()
+                phi = self.motors_hwobj_dict["kappa_phi"].get_value()
                 c["kappa_phi"] = phi
             else:
                 c["kappa_phi"] = self.goniometer.get_phi_position()
@@ -993,23 +990,23 @@ class PX2Diffractometer(AbstractDiffractometer):     #(GenericDiffractometer):
                     self.beam_position[1] - self.zoom_centre["y"]
                 ) / self.pixels_per_mm_y - y
                 motor_pos = {
-                    self.motor_hwobj_dict["sampx"]: centred_position.sampx,
-                    self.motor_hwobj_dict["sampy"]: centred_position.sampy,
-                    self.motor_hwobj_dict["phi"]: centred_position.phi,
-                    self.motor_hwobj_dict["phiy"]: (
+                    self.motors_hwobj_dict["sampx"]: centred_position.sampx,
+                    self.motors_hwobj_dict["sampy"]: centred_position.sampy,
+                    self.motors_hwobj_dict["phi"]: centred_position.phi,
+                    self.motors_hwobj_dict["phiy"]: (
                         centred_position.phiy
                         + self.centring_hwobj.camera2alignmentMotor(
-                            self.motor_hwobj_dict["phiy"], {"X": dx, "Y": dy}
+                            self.motors_hwobj_dict["phiy"], {"X": dx, "Y": dy}
                         )
                     ),
-                    self.motor_hwobj_dict["phiz"]: (
+                    self.motors_hwobj_dict["phiz"]: (
                         centred_position.phiz
                         + self.centring_hwobj.camera2alignmentMotor(
-                            self.motor_hwobj_dict["phiz"], {"X": dx, "Y": dy}
+                            self.motors_hwobj_dict["phiz"], {"X": dx, "Y": dy}
                         )
                     ),
-                    self.motor_hwobj_dict["kappa"]: centred_position.kappa,
-                    self.motor_hwobj_dict["kappa_phi"]: centred_position.kappa_phi,
+                    self.motors_hwobj_dict["kappa"]: centred_position.kappa,
+                    self.motors_hwobj_dict["kappa_phi"]: centred_position.kappa_phi,
                 }
                 self.move_to_motors_positions(motor_pos)
             except Exception:
@@ -1039,8 +1036,8 @@ class PX2Diffractometer(AbstractDiffractometer):     #(GenericDiffractometer):
         """
         Descript. :
         """
-        kappa = self.motor_hwobj_dict["kappa"].get_value()
-        kappa_phi = self.motor_hwobj_dict["kappa_phi"].get_value()
+        kappa = self.motors_hwobj_dict["kappa"].get_value()
+        kappa_phi = self.motors_hwobj_dict["kappa_phi"].get_value()
 
         if new_kappa is None:
             new_kappa = kappa
@@ -1053,18 +1050,18 @@ class PX2Diffractometer(AbstractDiffractometer):     #(GenericDiffractometer):
             new_kappa,
             new_kappa_phi,
         ) and self.minikappa_correction_hwobj is not None:
-            sampx = self.motor_hwobj_dict["sampx"].get_value()
-            sampy = self.motor_hwobj_dict["sampy"].get_value()
-            phiy = self.motor_hwobj_dict["phiy"].get_value()
+            sampx = self.motors_hwobj_dict["sampx"].get_value()
+            sampy = self.motors_hwobj_dict["sampy"].get_value()
+            phiy = self.motors_hwobj_dict["phiy"].get_value()
             new_sampx, new_sampy, new_phiy = self.minikappa_correction_hwobj.shift(
                 kappa, kappa_phi, [sampx, sampy, phiy], new_kappa, new_kappa_phi
             )
 
-            motor_pos_dict[self.motor_hwobj_dict["kappa"]] = new_kappa
-            motor_pos_dict[self.motor_hwobj_dict["kappa_phi"]] = new_kappa_phi
-            motor_pos_dict[self.motor_hwobj_dict["sampx"]] = new_sampx
-            motor_pos_dict[self.motor_hwobj_dict["sampy"]] = new_sampy
-            motor_pos_dict[self.motor_hwobj_dict["phiy"]] = new_phiy
+            motor_pos_dict[self.motors_hwobj_dict["kappa"]] = new_kappa
+            motor_pos_dict[self.motors_hwobj_dict["kappa_phi"]] = new_kappa_phi
+            motor_pos_dict[self.motors_hwobj_dict["sampx"]] = new_sampx
+            motor_pos_dict[self.motors_hwobj_dict["sampy"]] = new_sampy
+            motor_pos_dict[self.motors_hwobj_dict["phiy"]] = new_phiy
 
             self.move_motors(motor_pos_dict, timeout=30)
 
@@ -1077,8 +1074,8 @@ class PX2Diffractometer(AbstractDiffractometer):     #(GenericDiffractometer):
         else:
             t1 = [point_1.sampx, point_1.sampy, point_1.phiy]
             t2 = [point_2.sampx, point_2.sampy, point_2.phiy]
-            kappa = self.motor_hwobj_dict["kappa"].get_value()
-            phi = self.motor_hwobj_dict["kappa_phi"].get_value()
+            kappa = self.motors_hwobj_dict["kappa"].get_value()
+            phi = self.motors_hwobj_dict["kappa_phi"].get_value()
             (
                 new_kappa,
                 new_phi,
@@ -1091,11 +1088,11 @@ class PX2Diffractometer(AbstractDiffractometer):     #(GenericDiffractometer):
             # self.minikappa_correction_hwobj.alignVector(t1,t2,kappa,phi)
             self.move_to_motors_positions(
                 {
-                    self.motor_hwobj_dict["kappa"]: new_kappa,
-                    self.motor_hwobj_dict["kappa_phi"]: new_phi,
-                    self.motor_hwobj_dict["sampx"]: new_sampx,
-                    self.motor_hwobj_dict["sampy"]: new_sampy,
-                    self.motor_hwobj_dict["phiy"]: new_phiy,
+                    self.motors_hwobj_dict["kappa"]: new_kappa,
+                    self.motors_hwobj_dict["kappa_phi"]: new_phi,
+                    self.motors_hwobj_dict["sampx"]: new_sampx,
+                    self.motors_hwobj_dict["sampy"]: new_sampy,
+                    self.motors_hwobj_dict["phiy"]: new_phiy,
                 }
             )
 
@@ -1127,7 +1124,7 @@ class PX2Diffractometer(AbstractDiffractometer):     #(GenericDiffractometer):
         """
         Description:
         """
-        self.motor_hwobj_dict["phi"].set_value_relative(relative_angle, 5)
+        self.motors_hwobj_dict["phi"].set_value_relative(relative_angle, 5)
 
     def close_kappa(self):
         """
@@ -1140,7 +1137,7 @@ class PX2Diffractometer(AbstractDiffractometer):     #(GenericDiffractometer):
         self.log.debug("Started closing Kappa")
         self.move_kappa_and_phi_procedure(0, None)
         self.wait_device_ready(60)
-        self.motor_hwobj_dict["kappa"].homeMotor()
+        self.motors_hwobj_dict["kappa"].homeMotor()
         self.wait_device_ready(60)
         self.move_kappa_and_phi_procedure(0, None)
         self.wait_device_ready(60)
@@ -1174,10 +1171,10 @@ class PX2Diffractometer(AbstractDiffractometer):     #(GenericDiffractometer):
         return new_point
 
     def get_osc_limits(self):
-        return self.motor_hwobj_dict["phi"].get_dynamic_limits()
+        return self.motors_hwobj_dict["phi"].get_dynamic_limits()
 
     def get_osc_max_speed(self):
-        return self.motor_hwobj_dict["phi"].get_max_speed()
+        return self.motors_hwobj_dict["phi"].get_max_speed()
 
     def get_scan_limits(self, speed=None, num_images=None, exp_time=None):
         """optical_alignment
