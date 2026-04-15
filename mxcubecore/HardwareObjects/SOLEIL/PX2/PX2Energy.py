@@ -15,10 +15,8 @@ from mxcubecore.HardwareObjects.mockup.EnergyMockup import EnergyMockup
 class PX2Energy(EnergyMockup):
     def init(self):
         self.energy = energy()
-
         self.energy_channel = self.get_channel_object("energy")
         self.energy_channel.connect_signal("update", self.energy_changed)
-
         self.state_channel = self.get_channel_object("state")
         self.state_channel.connect_signal("update", self.energy_state_changed)
 
@@ -28,11 +26,13 @@ class PX2Energy(EnergyMockup):
         self.minimum_energy = self.get_property("min_energy")
         self.maximum_energy = self.get_property("max_energy")
 
-        self.current_energy = self.energy.get_value() / kilo
+        self.current_energy = self.energy_channel.value / kilo
         self.current_wavelength = self.get_wavelegth_from_energy(self.current_energy)
 
         self.checkLimits = self.check_limits
         self.cancelMoveEnergy = self.cancel_move_energy
+
+        print("L"*50)
 
     def re_emit_values(self):
         self.emit("energyChanged", (self.current_energy, self.current_wavelength))
@@ -42,7 +42,7 @@ class PX2Energy(EnergyMockup):
         self.energy.abort()
 
     def get_current_energy(self):
-        return self.energy.get_energy() / kilo
+        return self.energy_channel.value / kilo
 
     def get_wavelegth_from_energy(self, energy):
         return (h * c) / (eV * angstrom * kilo) / energy
