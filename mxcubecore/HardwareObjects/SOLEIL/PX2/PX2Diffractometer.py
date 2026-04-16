@@ -44,7 +44,6 @@ from goniometer import goniometer
 
 from mxcubecore import HardwareRepository as HWR
 from mxcubecore.BaseHardwareObjects import HardwareObject, HardwareObjectState
-from mxcubecore.Command.Exporter import Exporter
 from mxcubecore.HardwareObjects.abstract.AbstractDiffractometer import (
     AbstractDiffractometer,
     DiffractometerHead,
@@ -176,6 +175,27 @@ class PX2Diffractometer(AbstractDiffractometer):
     }
     PHASE_TO_MD2 = {phase: name for name, phase in PHASE_FROM_MD2.items()}
 
+    @staticmethod
+    def _extract_shared_exporter(channel):
+        """Return the Exporter instance backing an already-loaded channel.
+
+        The exporter address is declared once, as the key of the YAML
+        ``exporter:`` section; the loader starts a single cached Exporter
+        for it before ``init()`` runs. We pull it off any channel so the
+        address does not have to be restated as a configuration property.
+        """
+        if channel is None:
+            raise RuntimeError(
+                "PX2Diffractometer: no Exporter channel configured — "
+                "check the 'exporter:' section in diffractometer.yaml"
+            )
+        exporter = getattr(channel, "_ExporterChannel__exporter", None)
+        if exporter is None:
+            raise RuntimeError(
+                "PX2Diffractometer: channel %r is not an ExporterChannel" % channel
+            )
+        return exporter
+
     def __init__(self, name):
         super().__init__(name)
         self._exporter = None
@@ -224,11 +244,12 @@ class PX2Diffractometer(AbstractDiffractometer):
         HardwareObject.init(self)
         self.username = self.get_property("username") or self.username
 
-        exporter_address = self.get_property("exporter_address")
-        if not exporter_address:
-            raise RuntimeError("PX2Diffractometer: 'exporter_address' missing")
-        host, port = exporter_address.split(":")
-        self._exporter = Exporter(host, int(port))
+        # Standard channels were already attached by setup_commands_channels()
+        # before init() runs. Grab the shared Exporter off one of them rather
+        # than restating the address as a separate configuration property.
+        self.chan_state = self.get_channel_object("State")
+        self.chan_status = self.get_channel_object("Status")
+        self._exporter = self._extract_shared_exporter(self.chan_state)
 
         configured_motors = list(
             self.config.motors or self.MOTOR_ROLE_TO_MD2.keys()
@@ -256,8 +277,6 @@ class PX2Diffractometer(AbstractDiffractometer):
             setattr(self, role, obj)
             self.connect(obj, "valueChanged", obj.update_value)
 
-        self.chan_state = self.get_channel_object("State")
-        self.chan_status = self.get_channel_object("Status")
         if self.chan_state:
             self.current_state = self.chan_state.get_value()
             self.chan_state.connect_signal("update", self.state_changed)
