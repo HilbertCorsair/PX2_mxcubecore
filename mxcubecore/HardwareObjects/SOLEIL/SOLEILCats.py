@@ -17,26 +17,13 @@
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with MXCuBE. If not, see <http://www.gnu.org/licenses/>.
 """
-
 import time
 import logging
 import gevent
-
-from mxcubecore.HardwareObjects.Cats90 import *
 from mxcubecore.TaskUtils import task
-from mxcubecore import HardwareRepository as HWR
-
-try:
-    from cats import cats
-    from goniometer import goniometer
-    from mount import mount
-except ModuleNotFoundError:
-    from experimental_methods import (
-        cats,
-        goniometer,
-        mount,
-    )
-
+from mxcubecore.HardwareObjects.Cats90 import *
+from cats import cats
+from goniometer import goniometer
 cats_api = cats()
 
 class SoleilPuck(Basket):
@@ -66,14 +53,12 @@ class SOLEILCats(Cats90):
     default_no_lids = 3
     baskets_per_lid = 3
     default_samples_per_basket = 16
-    default_no_of_baskets = 12 #9
+    default_no_of_baskets = 9
     default_basket_type = BASKET_UNIPUCK
     DETECT_PUCKS = True
     default_soak_lid = 2
-    cats_api = None
     
     def init(self):
-
         self.cats_api = cats_api
         self.goniometer = goniometer()
         self._selected_sample = None
@@ -104,10 +89,8 @@ class SOLEILCats(Cats90):
         self._powered = None
         self._running = None
         self._regulating = None
-        self._lid1state = None
         self._lid2state = None
         self._lid3state = None
-        #self.no_of_baskets = None
         self._message = None
         
         # add support for CATS dewars with variable number of lids
@@ -135,7 +118,7 @@ class SOLEILCats(Cats90):
 
         # declare channels to detect basket presence changes
         self.basket_channels = []
-        
+      
         # Create channels
         # device_name, internal_name, update_method_name
         channel_attributes = \
@@ -165,11 +148,7 @@ class SOLEILCats(Cats90):
                 _channel_name = "_chn%s" % channel_attribute
                 channel_name = channel_attribute
                 _update_method_name = "_update_%s" % channel_attribute
-            print(f"\n{channel_name}\n")
-            if channel_name in ['di_Cassette10Presence', 'di_Cassette11Presence', '_chnBasket11State','di_Cassette12Presence', '_chnBasket12State']:
-                print(f"Skipping {channel_attribute}")
-                next
-
+                
             channel = self.add_channel(
                 {
                     "type": "tango",
@@ -191,6 +170,7 @@ class SOLEILCats(Cats90):
                 logging.debug('connecting signal update from %s to %s' % (_channel_name, _update_method_name))
                 channel_object = getattr(self, _channel_name)
                 if channel_object is not None:
+
                     getattr(self, _update_method_name)(channel_object.get_value())
                     channel_object.connect_signal("update", getattr(self, _update_method_name))
                 else:
@@ -211,7 +191,7 @@ class SOLEILCats(Cats90):
                 "Back",
                 "Safe",
                 "Home",
-                ("Dry", "dry"),
+                ("Dry", "dry_soak"),
                 ("DrySoak", "dry_soak"),
                 "Soak",
                 ("ResetParameters", "reset_parameters"),
@@ -226,9 +206,7 @@ class SOLEILCats(Cats90):
                 "CloseLid2",
                 "CloseLid3"
             )
-        
-        for command_attribute in command_attributes:
-            if type(command_attribute) == tuple:
+
                 command_name = command_attribute[1]
                 _command_name = "_cmd%s" % command_attribute[0]
             else:
@@ -276,13 +254,6 @@ class SOLEILCats(Cats90):
         except Exception:
             pass
 
-        try:
-            self.archive_directory = "%s/mount" % HWR.beamline.session.get_archive_directory()
-        except:
-            self.archive_directory = None
-        
-        self.mount = mount(-1, -1, directory=self.archive_directory, wash=False, cats_api=self.cats_api)
-        
     def get_basket_list(self):
         basket_list = []
         dewar_content = self.cats_api.get_dewar_content()
@@ -422,8 +393,7 @@ class SOLEILCats(Cats90):
         self._trigger_contents_updated_event()
         self._update_loaded_sample()
         logging.getLogger("HWR").debug('_update_cats_contents took %.6f' % (time.time() - _start))
-
-    
+        
     def check_power_on(self):
         if not self._chnPowered.get_value():
             logging.getLogger().info("CATS power is not enabled. Switching on the arm power ...")
@@ -444,8 +414,8 @@ class SOLEILCats(Cats90):
 
         self._update_state()  # remove software flags like Loading.
         logging.getLogger().info('in load')
-        #self.assert_not_charging()
-        #self.check_power_on()
+        self.assert_not_charging()
+        self.check_power_on()
         location = sample
         logging.getLogger('HWR').info('load, location %s' % str(location))
 
@@ -460,54 +430,15 @@ class SOLEILCats(Cats90):
         sample_in_lid = int(sample_in_lid)
         logging.getLogger('HWR').info('load, puck %d, sample %d (lid: %d, sample in lid: %d)' % (puck, sample, lid, sample_in_lid))
         
-        #self.cats_api.getput(lid, sample_in_lid, wait=True)
-        
-        mpuck, msample = self.cats_api.get_mounted_puck_and_sample()
-        wash = mpuck == puck and msample == sample
-            
-        self.mount.timestamp = time.time()
-        self.mount.puck = puck
-        self.mount.sample = sample
-        self.mount.directory = self.get_mount_directory()
-        self.mount.unload=False
-        self.mount.wash = wash
-        self.mount.set_name_pattern()
-        self.mount.execute()
-        
-        #mnt = mount(puck, sample, directory=directory, wash=wash, cats_api=self.cats_api)
-        #mnt.execute()
-        
-        
+        self.cats_api.getput(lid, sample_in_lid, wait=True)
         self._trigger_info_changed_event()
 
-    def get_mount_directory(self):
-        try:
-            directory = "%s/mount" % HWR.beamline.session.get_archive_directory()
-        except:
-            directory = None
-
-        return directory
-    
     def unload(self, sample_slot=None, wait=True):
         logging.getLogger().info('in unload')
-        #self.assert_not_charging()
-        #self.check_power_on()
-        #self.cats_api.get(wait=True)
-        cur_puck, cur_sample = self.cats_api.get_mounted_puck_and_sample()
-            
-        #mnt = mount(cur_puck, cur_sample, directory=directory, unload=True, cats_api=self.cats_api)
-        #mnt.execute()
-        self.mount.timestamp = time.time()
-        self.mount.puck = cur_puck
-        self.mount.sample = cur_sample
-        self.mount.directory = self.get_mount_directory()
-        self.mount.unload = True
-        self.mount.wash = False
-        self.mount.set_name_pattern()
-        self.mount.execute()
-        
-        self._trigger_info_changed_event()
-        
+        self.assert_not_charging()
+        self.check_power_on()
+        self.cats_api.get(wait=True)
+ 
     def _update_loaded_sample(self, sample_num=None, lid=None, separator="_"):
         _start = time.time()
         if None in [sample_num, lid]:
@@ -525,35 +456,11 @@ class SOLEILCats(Cats90):
         )
 
         if -1 not in [loadedSampleLid, loadedSampleNum]:
-            basket, sample = self.cats_api.get_mounted_puck_and_sample(lid=loadedSampleLid, sample=loadedSampleNum)
+            basket, sample = self.lidsample_to_basketsample(
+                loadedSampleLid, loadedSampleNum
+            )
             address = "%d%s%02d" % (basket, separator, sample)
             new_sample = self._get_by_address(address)
-            #try:
-                #basket, sample = self.lidsample_to_basketsample(
-                    #loadedSampleLid, loadedSampleNum
-                #)
-            #except:
-                #logging.getLogger("HWR").info(
-                #"trued to update loaded sample %d%s%02d" % (loadedSampleLid, separator, loadedSampleNum)
-                #)
-
-                ##def test(s):
-                ##...:     puck, sample = divmod(s, 16)
-                ##...:     if sample == 0:
-                ##...:        puck -= 1
-                ##...:        sample = 16
-                ##...: 
-                ##...:     basket, sample = puck+10, sample
-                ##...:     return basket, sample
-
-                #puck, sample = divmod(loadedSampleNum, 16)
-                #if sample == 0:
-                    #puck -= 1
-                    #sample = 16
-                    
-                #basket, sample = puck+10, sample
-            #address = "%d%s%02d" % (basket, separator, sample)
-            #new_sample = self._get_by_address(address)
         else:
             basket, sample = None, None
             new_sample = None
@@ -593,7 +500,6 @@ class SOLEILCats(Cats90):
             ):
                 self._trigger_loaded_sample_changed_event(new_sample)
                 self._trigger_info_changed_event()
-        #self.update_info()
         self._trigger_info_changed_event()
         logging.getLogger('HWR').debug('_update_loaded_sample took %.4f' % (time.time() - _start))
     
@@ -603,41 +509,23 @@ class SOLEILCats(Cats90):
         self._update_state()
         
     def has_loaded_sample(self):
-        #self._update_loaded_sample()
-        #sample_mounted = self.cats_api.sample_mounted()
         return self.goniometer.sample_is_loaded()
     
-        #LoadedSample = self._chnNumLoadedSample.get_value()
-        #logging.getLogger('HWR').debug('has_loaded_sample, self.cats_loaded_lid %s, self.cats_loaded_num %s, LoadedSample %s' % (self.cats_loaded_lid, self.cats_loaded_num, LoadedSample))
-        #if self.cats_loaded_lid != -1 or self.cats_loaded_num != -1 or LoadedSample>0:
-            #return True
-        #else:
-            #return False
-
-    def get_loaded_sample_address(self, separator="_", puck=None, sample=None):
+    def get_loaded_sample(self, separator="_", puck=None, sample=None):
         if puck is None or sample is None:
             logging.getLogger("HWR").debug('in get_loaded_sample, querying cats device for NumLoadedSample and LidLoadedSample')
             loadedSampleNum = int(self._chnNumLoadedSample.get_value())
             loadedSampleLid = int(self._chnLidLoadedSample.get_value())
             logging.getLogger("HWR").debug('NumLoadedSample %d, LidLoadedSample %d' % (loadedSampleNum, loadedSampleLid))
-            puck, sample = self.cats_api.get_mounted_puck_and_sample(lid=loadedSampleLid, sample=loadedSampleNum)
-            #try:
-                #puck, sample = self.lidsample_to_basketsample(
-                    #loadedSampleLid, loadedSampleNum
-                #)
-                #if loadedSampleLid is None or loadedSampleLid is None:
-                    #logging.getLogger("HWR").info('in get_loaded_sample, querying cats_api get_mounted_puck_and_sample')
-                    #puck, sample = self.cats_api.get_mounted_puck_and_sample()
-                    #logging.getLogger("HWR").info('sample %d, puck %d' % (sample, puck))
-            #except:
-                 #puck, sample = divmod(loadedSampleNum, 16)
-                 #puck, sample = puck+10, sample
+            puck, sample = self.lidsample_to_basketsample(
+                loadedSampleLid, loadedSampleNum
+            )
+            if loadedSampleLid is None or loadedSampleLid is None:
+                logging.getLogger("HWR").info('in get_loaded_sample, querying cats_api get_mounted_puck_and_sample')
+                puck, sample = self.cats_api.get_mounted_puck_and_sample()
+                logging.getLogger("HWR").info('sample %d, puck %d' % (sample, puck))
             
         address = '%d%s%02d' % (puck, separator, sample)
-        return address
-    
-    def get_loaded_sample(self, separator="_", puck=None, sample=None):
-        address = self.get_loaded_sample_address(separator=separator, puck=puck, sample=sample)
         logging.getLogger("HWR").debug('in get_loaded_sample, address %s' % address)
         return self.get_component_by_address(address)
 
@@ -646,7 +534,6 @@ class SOLEILCats(Cats90):
         Raises:
             (Exception): If sample changer is not charging
         """
-        #if self.state == SampleChangerState.Charging:
         if self.cats_running:
             raise Exception("Sample Changer is in Charging mode")
         
@@ -761,9 +648,9 @@ class SOLEILCats(Cats90):
         :returns: None
         :rtype: None
         """
-        #tool = self.get_current_tool()
-        #self._cmdDrySoak([str(tool), str(self.soak_lid)])
-        self.cats_api.dry_and_soak2()
+        tool = self.get_current_tool()
+        self._cmdDrySoak([str(tool), str(self.soak_lid)])
+
         
     def _do_set_on_diff(self, sample):
         """
@@ -819,7 +706,6 @@ class SOLEILCats(Cats90):
         else:
             self._cmdPowerOff()
 
-        #self.do_state_action("power", state)
 
     def _do_enable_regulation(self):
         """
@@ -897,7 +783,7 @@ class SOLEILCats(Cats90):
         else:
             return ret
 
-    @task
+    @task #--Martin 
     def _run(self, method, *args):
         exception = None
         ret = None
@@ -1032,11 +918,9 @@ class SOLEILCats(Cats90):
         channel_attributes = \
             (
                 ("State", "State", "_update_state"),
-                #("Status", "Status", "_update_status"),
                 ("Powered", "Powered", "_update_powered_state"),
                 ("PathRunning", "PathRunning", "_update_running_state"),
                 ("NumSampleOnDiff", "NumLoadedSample", "_update_loaded_sample"), 
-                #("LidSampleOnDiff", "LidLoadedSample", "_update_loaded_sample"), 
                 ("Barcode", "SampleBarcode", "_update_barcode"), 
                 ("di_AllLidsClosed", "AllLidsClosed", "_update_global_state"), 
                 ("Message", "Message", "_update_message"),
@@ -1134,8 +1018,6 @@ class SOLEILCats(Cats90):
         return ret
 
     def send_command(self, cmd_name, args=None):
-
-        #
         lid = 1
         toolcal = 0
         tool = self.get_current_tool()
@@ -1171,7 +1053,6 @@ class SOLEILCats(Cats90):
             return ret
         except Exception as exc:
             import traceback
-
             traceback.print_exc()
             msg = exc[0].desc
             raise Exception(msg)

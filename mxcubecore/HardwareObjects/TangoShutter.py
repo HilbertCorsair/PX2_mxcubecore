@@ -129,6 +129,7 @@ class TangoShutter(AbstractShutter):
                 "FAULT": "FAULT",
             }
         )
+        
         try:
             config_values = json.loads(self.get_property("values"))
             for key, val in config_values.items():
@@ -139,7 +140,6 @@ class TangoShutter(AbstractShutter):
                     values_dict.update({key: val})
         except (ValueError, TypeError):
             hwr_logger.exception("Exception in _initialise_values()")
-
         self.VALUES = Enum("ValueEnum", values_dict)
         self.SPECIFIC_STATES = Enum("TangoShutterStates", states_dict)
 

@@ -52,22 +52,6 @@ class PX2Guillotine(BaseHardwareObjects.HardwareObject):
         "ON": "UNKNOWN",
         "ALARM": "ALARM",
     }
-    # shutterState = {
-    # None: 'unknown',
-    # 'UNKNOWN': 'unknown',
-    # 'CLOSE': 'closed',
-    # 'OPEN': 'opened',
-    # 'INSERT': 'closed',
-    # 'EXTRACT': 'opened',
-    # 'MOVING': 'moving',
-    # 'RUNNING':'moving',
-    # '_': 'automatic',
-    # 'FAULT': 'fault',
-    # 'DISABLE': 'disabled',
-    # 'OFF': 'fault',
-    # 'STANDBY': 'standby',
-    # 'ON': 'unknown'
-    # }
     shutterStateString = {
         "ON": "white",
         "OFF": "#012345",
