@@ -207,6 +207,8 @@ class SOLEILCats(Cats90):
                 "CloseLid3"
             )
 
+        for command_attribute in command_attributes:
+            if isinstance(command_attribute, tuple):
                 command_name = command_attribute[1]
                 _command_name = "_cmd%s" % command_attribute[0]
             else:
