@@ -130,7 +130,7 @@ class TangoShutter(AbstractShutter):
             }
         )
         
-        try:
+        """try:
             config_values = json.loads(self.get_property("values"))
             for key, val in config_values.items():
                 if isinstance(val, (tuple, list)):
@@ -139,7 +139,7 @@ class TangoShutter(AbstractShutter):
                 else:
                     values_dict.update({key: val})
         except (ValueError, TypeError):
-            hwr_logger.exception("Exception in _initialise_values()")
+            hwr_logger.exception("Exception in _initialise_values()") """
         self.VALUES = Enum("ValueEnum", values_dict)
         self.SPECIFIC_STATES = Enum("TangoShutterStates", states_dict)
 
