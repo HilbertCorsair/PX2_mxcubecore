@@ -114,8 +114,8 @@ class PX2Energy(AbstractEnergy):
             if self.moving:
                 self.moving = False
             self.emit("moveEnergyFinished", ())
-            self.emit("stateChanged", "ready")
+            self.update_state(self.STATES.READY)
             self.emit("statusInfoChanged", "")
         elif state in ["MOVING", "ALARM", "FAULT"]:
             self.emit("moveEnergyStarted", ())
-            self.emit("stateChanged", "busy")
+            self.update_state(self.STATES.BUSY)
