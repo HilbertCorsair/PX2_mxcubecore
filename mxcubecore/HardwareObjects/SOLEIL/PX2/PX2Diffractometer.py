@@ -485,8 +485,7 @@ class PX2Diffractometer(AbstractDiffractometer):
 
     def fast_shutter_state_changed(self, is_open):
         self.fast_shutter_is_open = is_open
-        msg = "Opened" if is_open else "Closed"
-        self.emit("minidiffShutterStateChanged", (self.fast_shutter_is_open, msg))
+        self.emit("minidiffShutterStateChanged", (self.fast_shutter_is_open,))
 
     def toggle_fast_shutter(self):
         if self.chan_fast_shutter_is_open is not None:
@@ -550,6 +549,8 @@ class PX2Diffractometer(AbstractDiffractometer):
     # ------------------------------------------------------------------
 
     def start_auto_focus(self, timeout=None):
+        if self.cmd_start_auto_focus is None:
+            return
         if timeout:
             self._ready_event.clear()
             gevent.spawn(self.cmd_start_auto_focus)

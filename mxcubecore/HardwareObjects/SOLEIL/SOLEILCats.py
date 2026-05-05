@@ -28,17 +28,13 @@ cats_api = cats()
 
 class SoleilPuck(Basket):
     def __init__(self, container, number, samples_num=16, name="UniPuck", parent=None):
-        super(Basket, self).__init__(
-            self.__TYPE__, container, Basket.get_basket_address(number), True
+        super(SoleilPuck, self).__init__(
+            container, number, samples_num=samples_num, name=name
         )
 
-        self._name = name
-        self.samples_num = samples_num
         self.parent = parent
-        for i in range(samples_num):
-            slot = Pin(self, number, i + 1)
-            self._add_component(slot)
-            if self.parent is not None:
+        if self.parent is not None:
+            for slot in self.get_components():
                 self.parent.component_by_adddress[slot.get_address()] = slot
         
 class SOLEILCats(Cats90):
@@ -100,7 +96,7 @@ class SOLEILCats(Cats90):
         logging.getLogger("HWR").debug('tangoname %s' % self.tangoname)
         self.polling = self.get_property("polling")
         logging.getLogger("HWR").debug('polling %s ' % self.polling)
-        self.no_of_lids = self.get_property("no_of_lids%", self.default_no_lids)
+        self.no_of_lids = self.get_property("no_of_lids", self.default_no_lids)
         logging.getLogger("HWR").debug('no_of_lids %s ' %  self.no_of_lids)
         self.no_of_baskets = self.get_property("no_of_baskets", self.default_no_of_baskets)
         logging.getLogger("HWR").debug('no_of_baskets %s ' % self.no_of_baskets)
@@ -148,7 +144,7 @@ class SOLEILCats(Cats90):
                 _channel_name = "_chn%s" % channel_attribute
                 channel_name = channel_attribute
                 _update_method_name = "_update_%s" % channel_attribute
-                
+
             channel = self.add_channel(
                 {
                     "type": "tango",
@@ -159,20 +155,20 @@ class SOLEILCats(Cats90):
                  channel_name_in_device)
             logging.getLogger("HWR").debug('adding channel %s %s' % (_channel_name, str(channel)))
             setattr(self, _channel_name, channel)
-            
+
             if "Basket" in _channel_name or "Cassette" in _channel_name:
                 self.basket_channels.append(channel)
             elif "status" in _channel_name.lower():
                 pass
             elif "NumLoadedSample" in _channel_name:
-                pass            
+                pass
             else:
+                handler = self._resolve_update_handler(_update_method_name)
                 logging.debug('connecting signal update from %s to %s' % (_channel_name, _update_method_name))
                 channel_object = getattr(self, _channel_name)
-                if channel_object is not None:
-
-                    getattr(self, _update_method_name)(channel_object.get_value())
-                    channel_object.connect_signal("update", getattr(self, _update_method_name))
+                if channel_object is not None and handler is not None:
+                    handler(channel_object.get_value())
+                    channel_object.connect_signal("update", handler)
                 else:
                     logging.warning('connecting signal update from %s to %s did not work' % (_channel_name, _update_method_name))
             
@@ -204,7 +200,17 @@ class SOLEILCats(Cats90):
                 "OpenLid3",
                 "CloseLid1",
                 "CloseLid2",
-                "CloseLid3"
+                "CloseLid3",
+                # TODO confirm tango command names for the entries below against the CATS device
+                ("ResetMotion", "reset_motion"),
+                ("RecoverFailure", "recoverFailure"),
+                ("Calibration", "toolcalibration"),
+                ("SetOnDiff", "setondiff"),
+                ("MagnetOn", "magneton"),
+                ("MagnetOff", "magnetoff"),
+                ("ToolOpen", "opentool"),
+                ("ToolClose", "closetool"),
+                ("CloseTool", "closetool"),
             )
 
         for command_attribute in command_attributes:
@@ -427,7 +433,7 @@ class SOLEILCats(Cats90):
             puck, sample = location
             
         lid = (puck - 1) / self.no_of_lids + 1
-        sample_in_lid = ((puck - 1) % self.no_of_lids) * self.no_of_samples_in_basket + sample
+        sample_in_lid = ((puck - 1) % self.no_of_lids) * self.samples_per_basket + sample
         lid = int(lid)
         sample_in_lid = int(sample_in_lid)
         logging.getLogger('HWR').info('load, puck %d, sample %d (lid: %d, sample in lid: %d)' % (puck, sample, lid, sample_in_lid))
@@ -498,7 +504,7 @@ class SOLEILCats(Cats90):
             if (
                 (old_sample is None)
                 or (new_sample is None)
-                or (old_sample.get_address() != new_loaded.get_address())
+                or (old_sample.get_address() != new_sample.get_address())
             ):
                 self._trigger_loaded_sample_changed_event(new_sample)
                 self._trigger_info_changed_event()
@@ -834,19 +840,40 @@ class SOLEILCats(Cats90):
         self._update_global_state()
 
     def _update_lid1_state(self, value):
-        self._lid1state = value
-        self.emit("lid1StateChanged", (value,))
-        self._update_global_state()
+        self._update_lid_state(1, value)
 
     def _update_lid2_state(self, value):
-        self._lid2state = value
-        self.emit("lid2StateChanged", (value,))
-        self._update_global_state()
+        self._update_lid_state(2, value)
 
     def _update_lid3_state(self, value):
-        self._lid3state = value
-        self.emit("lid3StateChanged", (value,))
+        self._update_lid_state(3, value)
+
+    def _update_lid_state(self, index, value):
+        setattr(self, "_lid%dstate" % index, value)
+        self.emit("lid%dStateChanged" % index, (value,))
         self._update_global_state()
+
+    def _update_basket_state(self, index, value):
+        self.emit("basket%dStateChanged" % index, (value,))
+        self._update_global_state()
+
+    def _resolve_update_handler(self, name):
+        """Return a callable for ``name``, generating per-index handlers for
+        _update_lid<N>_state / _update_basket<N>_state when no concrete
+        method exists."""
+        handler = getattr(self, name, None)
+        if handler is not None:
+            return handler
+        import re
+        m = re.match(r"_update_lid(\d+)_state$", name)
+        if m:
+            idx = int(m.group(1))
+            return lambda value, i=idx: self._update_lid_state(i, value)
+        m = re.match(r"_update_basket(\d+)_state$", name)
+        if m:
+            idx = int(m.group(1))
+            return lambda value, i=idx: self._update_basket_state(i, value)
+        return None
 
     def _update_operation_mode(self, value):
         self._charging = not value
@@ -951,9 +978,10 @@ class SOLEILCats(Cats90):
             elif "NumLoadedSample" in _channel_name:
                 pass            
             else:
+                handler = self._resolve_update_handler(_update_method_name)
                 channel_object = getattr(self, _channel_name)
-                if channel_object is not None:
-                    getattr(self, _update_method_name)(channel_object.get_value())
+                if channel_object is not None and handler is not None:
+                    handler(channel_object.get_value())
                 else:
                     logging.info('connecting signal update from %s to %s did not work' % (_channel_name, _update_method_name))
                     

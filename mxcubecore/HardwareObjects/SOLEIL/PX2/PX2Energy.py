@@ -9,12 +9,12 @@ from scipy.constants import (
     kilo,
 )
 
-from mxcubecore.HardwareObjects.mockup.EnergyMockup import EnergyMockup
-from mxcubecore.HardwareObjects.abstract import AbstractEnergy
+from mxcubecore.HardwareObjects.abstract.AbstractEnergy import AbstractEnergy
 
 class PX2Energy(AbstractEnergy):
-    def __init_(self):
-        super().__init_()
+    def __init__(self, name):
+        super().__init__(name)
+        self.moving = False
 
     def init(self):
         
@@ -81,7 +81,7 @@ class PX2Energy(AbstractEnergy):
     def check_limits(self, value):
         self.log.debug("Checking the move limits")
         en_lims = self.get_limits()
-        if value >= self.en_lims[0] and value <= self.en_lims[1]:
+        if value >= en_lims[0] and value <= en_lims[1]:
             self.log.info("Limits ok")
             return True
         logging.getLogger("user_level_log").info("Requested value is out of limits")
@@ -113,10 +113,9 @@ class PX2Energy(AbstractEnergy):
         if state == "STANDBY":
             if self.moving:
                 self.moving = False
-                self.set_break_bragg()
-            self.move_energy_finished(0)
+            self.emit("moveEnergyFinished", ())
             self.emit("stateChanged", "ready")
             self.emit("statusInfoChanged", "")
         elif state in ["MOVING", "ALARM", "FAULT"]:
-            self.move_energy_started()
+            self.emit("moveEnergyStarted", ())
             self.emit("stateChanged", "busy")

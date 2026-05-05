@@ -63,13 +63,12 @@ class PX2Guillotine(BaseHardwareObjects.HardwareObject):
         "EXTRACT": "#512345",
         "MOVING": "#663300",
         "STANDBY": "#009900",
-        "FAULT": "#990000",
+        "FAULT": "#FF0000",
         "INIT": "#990000",
         "RUNNING": "#990000",
         "ALARM": "#990000",
         "DISABLED": "#EC3CDD",
         "UNKNOWN": "GRAY",
-        "FAULT": "#FF0000",
     }
 
     def __init__(self, name):
@@ -77,7 +76,7 @@ class PX2Guillotine(BaseHardwareObjects.HardwareObject):
         logging.info("Guillotine init ")
 
     def init(self):
-        self._shutterStateValue = "UNKNOWN"
+        self.shutterStateValue = "UNKNOWN"
         self._currentDistance = "None"
         self._d_security = self.get_property("security_distance")
         self._d_home = self.get_property("safe_distance")
@@ -102,8 +101,9 @@ class PX2Guillotine(BaseHardwareObjects.HardwareObject):
                 setattr(self, command_name, self.get_command_object(command_name))
 
         except KeyError:
-            logging.getLogger().warning("%s: cannot report State", self.name())
+            logging.getLogger().warning("%s: cannot report State", self.name)
 
+        self.pss_door = None
         try:
             self.pss_door = self.get_property("tangoname_pss")
         except Exception:
