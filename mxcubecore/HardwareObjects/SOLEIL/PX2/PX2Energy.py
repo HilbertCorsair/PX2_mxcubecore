@@ -10,10 +10,14 @@ from scipy.constants import (
 )
 
 from mxcubecore.HardwareObjects.mockup.EnergyMockup import EnergyMockup
+from mxcubecore.HardwareObjects.abstract import AbstractEnergy
 
+class PX2Energy(AbstractEnergy):
+    def __init_(self):
+        super().__init_()
 
-class PX2Energy(EnergyMockup):
     def init(self):
+        
         self.energy = energy()
         self.energy_channel = self.get_channel_object("energy")
         self.energy_channel.connect_signal("update", self.energy_changed)
@@ -90,6 +94,9 @@ class PX2Energy(EnergyMockup):
     def energy_changed(self, pos):
         # logging.getLogger('HWR').info("energy_changed %s" % str(pos))
         energy = pos
+        if not pos:
+            print("NO EN VAL")
+            return
         try:
             if abs(energy - self.current_energy) > 1e-3:
                 self.current_energy = energy
@@ -100,6 +107,7 @@ class PX2Energy(EnergyMockup):
             self.log.info("energy_changed: error occured during an energy update")
 
     def energy_state_changed(self, state):
+        state = state.name
         self.log.info("energy_state_changed %s" % str(state))
         # self.energy_server_check_for_errors(state)
         if state == "STANDBY":
@@ -109,6 +117,6 @@ class PX2Energy(EnergyMockup):
             self.move_energy_finished(0)
             self.emit("stateChanged", "ready")
             self.emit("statusInfoChanged", "")
-        elif state in ["MOVING", "ALARM"]:
+        elif state in ["MOVING", "ALARM", "FAULT"]:
             self.move_energy_started()
             self.emit("stateChanged", "busy")
