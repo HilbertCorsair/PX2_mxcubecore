@@ -31,6 +31,7 @@ import logging
 import os
 import time
 from ast import literal_eval
+from enum import Enum
 from math import sqrt
 
 import beam_align
@@ -503,17 +504,32 @@ class PX2Diffractometer(AbstractDiffractometer):
         self.update_pixels_per_mm()
         self.emit("zoomMotorPredefinedPositionChanged", (position_name, offset))
 
+    def _step_zoom(self, delta):
+        if not self.zoom_motor_hwobj:
+            return
+        levels = [v for v in self.zoom_motor_hwobj.VALUES if v.name != "UNKNOWN"]
+        levels.sort(key=lambda v: v.value)
+        current = self.zoom_motor_hwobj.get_value()
+        try:
+            idx = levels.index(current)
+        except ValueError:
+            idx = 0
+        new_idx = max(0, min(len(levels) - 1, idx + delta))
+        if levels[new_idx] is not current:
+            self.zoom_motor_hwobj.set_value(levels[new_idx])
+
     def zoom_in(self):
-        if self.zoom_motor_hwobj:
-            self.zoom_motor_hwobj.zoom_in()
+        self._step_zoom(+1)
 
     def zoom_out(self):
-        if self.zoom_motor_hwobj:
-            self.zoom_motor_hwobj.zoom_out()
+        self._step_zoom(-1)
 
     def set_zoom(self, position):
-        if self.zoom_motor_hwobj:
-            self.zoom_motor_hwobj.moveToPosition(position)
+        if not self.zoom_motor_hwobj:
+            return
+        if not isinstance(position, Enum):
+            position = self.zoom_motor_hwobj.value_to_enum(position)
+        self.zoom_motor_hwobj.set_value(position)
 
     # ------------------------------------------------------------------
     # Omega reference handling (overlay drawn on the SampleView)
