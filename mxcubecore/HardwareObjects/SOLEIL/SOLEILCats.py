@@ -444,15 +444,8 @@ class SOLEILCats(Cats90):
             basket = self.get_components()[basket_index]
             basket._set_info(False, None, False)
 
-        for basket_index in range(self.no_of_baskets):
-            basket = self.get_components()[basket_index]
-            for sample_index in range(basket.get_number_of_samples()):
-                address = "%d%s%02d" % (
-                    basket_index + 1,
-                    separator,
-                    sample_index + 1,
-                )
-                sample = self._get_by_address(address)
+        for basket in self.get_components():
+            for sample in basket.get_components():
                 sample._set_info(False, None, False)
                 sample._set_loaded(False, False)
                 sample._set_holder_length(Pin.STD_HOLDERLENGTH)

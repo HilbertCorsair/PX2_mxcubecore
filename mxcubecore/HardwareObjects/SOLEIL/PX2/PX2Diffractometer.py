@@ -267,17 +267,6 @@ class PX2Diffractometer(AbstractDiffractometer):
             self.motors_hwobj_dict[role] = proxy
             setattr(self, role, proxy)
 
-        for role in self.config.nstate_equipment or []:
-            obj = self.get_object_by_role(role)
-            if obj is None:
-                self.log.warning(
-                    "PX2Diffractometer: no nstate object for role '%s'", role
-                )
-                continue
-            self.nstate_equipment_hwobj_dict[role] = obj
-            setattr(self, role, obj)
-            self.connect(obj, "valueChanged", obj.update_value)
-
         if self.chan_state:
             self.current_state = self.chan_state.get_value()
             self.chan_state.connect_signal("update", self.state_changed)

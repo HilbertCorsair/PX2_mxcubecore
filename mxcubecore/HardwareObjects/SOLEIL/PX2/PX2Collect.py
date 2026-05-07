@@ -102,6 +102,7 @@ class PX2Collect(AbstractCollect, HardwareObject):
             detector_model=HWR.beamline.detector.get_property("model"),
             detector_px=HWR.beamline.detector.get_property("px"),
             detector_py=HWR.beamline.detector.get_property("py"),
+            detector_binning_mode=HWR.beamline.detector.get_binning_mode(),
             undulators=undulators,
             focusing_optic=self.get_property("focusing_optic"),
             monochromator_type=self.get_property("monochromator"),
