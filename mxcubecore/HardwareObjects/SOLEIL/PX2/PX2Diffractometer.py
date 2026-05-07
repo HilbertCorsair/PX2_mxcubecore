@@ -201,7 +201,7 @@ class PX2Diffractometer(AbstractDiffractometer):
         super().__init__(name)
         self._exporter = None
 
-        self.zoom_motor_hwobj = None
+        self.zoom = None
         self.omega_reference_motor = None
         self.omega_reference_par = None
         self.omega_reference_pos = [0, 0]
@@ -321,15 +321,15 @@ class PX2Diffractometer(AbstractDiffractometer):
             "saveCentringPositions"
         )
 
-        self.zoom_motor_hwobj = self.nstate_equipment_hwobj_dict.get(
+        self.zoom = self.nstate_equipment_hwobj_dict.get(
             "zoom"
         ) or self.get_object_by_role("zoom")
-        if self.zoom_motor_hwobj:
+        if self.zoom:
             self.connect(
-                self.zoom_motor_hwobj, "valueChanged", self.zoom_position_changed
+                self.zoom, "valueChanged", self.zoom_position_changed
             )
             self.connect(
-                self.zoom_motor_hwobj,
+                self.zoom,
                 "predefinedPositionChanged",
                 self.zoom_motor_predefined_position_changed,
             )
@@ -505,18 +505,18 @@ class PX2Diffractometer(AbstractDiffractometer):
         self.emit("zoomMotorPredefinedPositionChanged", (position_name, offset))
 
     def _step_zoom(self, delta):
-        if not self.zoom_motor_hwobj:
+        if not self.zoom:
             return
-        levels = [v for v in self.zoom_motor_hwobj.VALUES if v.name != "UNKNOWN"]
+        levels = [v for v in self.zoom.VALUES if v.name != "UNKNOWN"]
         levels.sort(key=lambda v: v.value)
-        current = self.zoom_motor_hwobj.get_value()
+        current = self.zoom.get_value()
         try:
             idx = levels.index(current)
         except ValueError:
             idx = 0
         new_idx = max(0, min(len(levels) - 1, idx + delta))
         if levels[new_idx] is not current:
-            self.zoom_motor_hwobj.set_value(levels[new_idx])
+            self.zoom.set_value(levels[new_idx])
 
     def zoom_in(self):
         self._step_zoom(+1)
@@ -525,11 +525,11 @@ class PX2Diffractometer(AbstractDiffractometer):
         self._step_zoom(-1)
 
     def set_zoom(self, position):
-        if not self.zoom_motor_hwobj:
+        if not self.zoom:
             return
         if not isinstance(position, Enum):
-            position = self.zoom_motor_hwobj.value_to_enum(position)
-        self.zoom_motor_hwobj.set_value(position)
+            position = self.zoom.value_to_enum(position)
+        self.zoom.set_value(position)
 
     # ------------------------------------------------------------------
     # Omega reference handling (overlay drawn on the SampleView)

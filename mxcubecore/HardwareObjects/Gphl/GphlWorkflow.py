@@ -68,7 +68,7 @@ class GphlWorkflowStates(enum.Enum):
     BUSY = "Workflow is executing"
     READY = "Workflow is idle and ready to start"
     FAULT = "Workflow shutting down from an error"
-    ABORTED = "HWorkflow shutting down after an abort or stop command
+    ABORTED = "Workflow shutting down after an abort or stop command
     COMPLETED = "Workflow has finished successfully"
     UNKNOWN = "Workflow state unknown"
     """
@@ -158,7 +158,7 @@ for atag in (
 ):
     all_point_group_tags += lattice2point_group_tags[atag]
 
-# Allowed altervative lattices for a given lattice
+# Allowed alternative lattices for a given lattice
 alternative_lattices = {}
 for list0 in (
     ["aP", "Triclinic"],
