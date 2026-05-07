@@ -1,48 +1,43 @@
+"""SOLEIL Proxima 2A CATS sample changer.
+
+Talks to the CATS Tango DS via channels/commands declared in the YAML
+configuration (see ``webconfig/singleton_objects/sample_changer.yaml``).
+This class also exposes the CATS *maintenance* surface (power, lids,
+trajectories) consumed by ``SOLEILCatsMaint`` — which is now a thin
+delegating proxy.
 """
-#  Project: MXCuBE
-#  https://github.com/mxcube
-#
-#  This file is part of MXCuBE software.
-#
-#  MXCuBE is free software: you can redistribute it and/or modify
-#  it under the terms of the GNU Lesser General Public License as published by
-#  the Free Software Foundation, either version 3 of the License, or
-#  (at your option) any later version.
-#
-#  MXCuBE is distributed in the hope that it will be useful,
-#  but WITHOUT ANY WARRANTY; without even the implied warranty of
-#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#  GNU Lesser General Public License for more details.
-#
-#  You should have received a copy of the GNU Lesser General Public License
-#  along with MXCuBE. If not, see <http://www.gnu.org/licenses/>.
-"""
-import time
+
 import logging
+import time
+import traceback
+
 import gevent
+
+from mxcubecore.HardwareObjects.Cats90 import (
+    BASKET_SPINE,
+    BASKET_UNIPUCK,
+    Basket,
+    Cats90,
+    Pin,
+    SpineBasket,
+    TOOL_DOUBLE_GRIPPER,
+    TOOL_UNIPUCK,
+    UnipuckBasket,
+)
 from mxcubecore.TaskUtils import task
-from mxcubecore.HardwareObjects.Cats90 import *
-from cats import cats
-from goniometer import goniometer
-cats_api = cats()
+
 
 class SoleilPuck(Basket):
     def __init__(self, container, number, samples_num=16, name="UniPuck", parent=None):
-        super(SoleilPuck, self).__init__(
-            container, number, samples_num=samples_num, name=name
-        )
-
+        super().__init__(container, number, samples_num=samples_num, name=name)
         self.parent = parent
         if self.parent is not None:
             for slot in self.get_components():
-                self.parent.component_by_adddress[slot.get_address()] = slot
-        
-class SOLEILCats(Cats90):
-    """
-    Actual implementation of the CATS Sample Changer,
-       BESSY BL14.1 installation with 3 lids and 90 samples
+                self.parent.component_by_address[slot.get_address()] = slot
 
-    """
+
+class SOLEILCats(Cats90):
+    """SOLEIL Proxima 2A CATS sample changer (12 baskets, 3 lids, UniPuck)."""
 
     __TYPE__ = "CATS"
 
@@ -53,214 +48,358 @@ class SOLEILCats(Cats90):
     default_basket_type = BASKET_UNIPUCK
     DETECT_PUCKS = True
     default_soak_lid = 2
-    
+
+    # Maps UI-facing command names (returned by get_cmd_info / passed to
+    # send_command) to the framework command attribute set up from YAML.
+    UI_COMMAND_MAP = {
+        "powerOn": "_cmdPowerOn",
+        "powerOff": "_cmdPowerOff",
+        "regulon": "_cmdRegulOn",
+        "openlid1": "_cmdOpenLid1",
+        "closelid1": "_cmdCloseLid1",
+        "openlid2": "_cmdOpenLid2",
+        "closelid2": "_cmdCloseLid2",
+        "openlid3": "_cmdOpenLid3",
+        "closelid3": "_cmdCloseLid3",
+        "home": "_cmdHome",
+        "dry": "_cmdDry",
+        "soak": "_cmdSoak",
+        "back": "_cmdBack",
+        "safe": "_cmdSafe",
+        "abort": "_cmdAbort",
+        "reset": "_cmdReset",
+        "clear_memory": "_cmdClearMemory",
+    }
+
+    # Channel name -> handler method name. Channels not in this map are
+    # retrieved but not auto-connected to a handler.
+    CHANNEL_HANDLERS = {
+        "_chnState": "_update_state",
+        "_chnPowered": "_update_powered_state",
+        "_chnPathRunning": "_update_running_state",
+        "_chnSampleBarcode": "_update_barcode",
+        "_chnAllLidsClosed": "_update_global_state",
+        "_chnMessage": "_update_message",
+        "_chnLN2Regulation": "_update_regulation_state",
+        "_chnCurrentTool": "_update_tool_state",
+        "_chnLid1State": "_update_lid1_state",
+        "_chnLid2State": "_update_lid2_state",
+        "_chnLid3State": "_update_lid3_state",
+    }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.cats_api = None
+        self.goniometer = None
+        self.component_by_address = {}
+        self.basket_channels = []
+        self.basket_presence = []
+        # Connection-health flag. Flipped by handlers and probes:
+        #   "UNKNOWN" — pre-init / not yet probed
+        #   "ONLINE"  — last read/probe succeeded
+        #   "OFFLINE" — last read/probe failed (PyCATS or Tango)
+        self._connection_state = "UNKNOWN"
+
+    def _lazy_load_external(self):
+        """Import and instantiate the external SOLEIL ``cats`` and
+        ``goniometer`` helpers. Done in init() rather than at module
+        import time so the module can be imported off-network without
+        triggering Tango connections.
+        """
+        try:
+            from cats import cats as cats_factory
+        except ModuleNotFoundError:
+            from experimental_methods import cats as cats_factory
+        try:
+            from goniometer import goniometer as goniometer_factory
+        except ModuleNotFoundError:
+            from experimental_methods import goniometer as goniometer_factory
+        log = logging.getLogger("HWR")
+        try:
+            self.cats_api = cats_factory()
+        except Exception as exc:
+            self._set_connection_state(
+                "OFFLINE", "PyCATS connect failed: %s" % exc
+            )
+            log.exception("SOLEILCats: PyCATS connect failed")
+            raise
+        try:
+            self.goniometer = goniometer_factory()
+        except Exception as exc:
+            log.exception("SOLEILCats: goniometer wrapper init failed")
+            raise
+
     def init(self):
-        self.cats_api = cats_api
-        self.goniometer = goniometer()
+        self._lazy_load_external()
+
+        # Bookkeeping defaults
         self._selected_sample = None
         self._selected_basket = None
         self._scIsCharging = None
-
         self.read_datamatrix = False
         self.unipuck_tool = TOOL_UNIPUCK
-
         self.former_loaded = None
         self.cats_device = None
-        self.component_by_adddress = {}
-        
         self.cats_datamatrix = ""
         self.cats_loaded_lid = None
         self.cats_loaded_num = None
-
-        # Default values
         self.cats_powered = False
         self.cats_status = ""
         self.cats_running = False
-        self.cats_state = 'Unknown'
+        self.cats_state = "Unknown"
         self.cats_lids_closed = False
-
-        self.basket_types = None
-        
         self._toolopen = None
         self._powered = None
         self._running = None
         self._regulating = None
+        self._lid1state = None
         self._lid2state = None
         self._lid3state = None
         self._message = None
-        
-        # add support for CATS dewars with variable number of lids
 
-        # Create channels from XML
+        # Configuration
         self.tangoname = self.get_property("tangoname")
-        logging.getLogger("HWR").debug('tangoname %s' % self.tangoname)
-        self.polling = self.get_property("polling")
-        logging.getLogger("HWR").debug('polling %s ' % self.polling)
         self.no_of_lids = self.get_property("no_of_lids", self.default_no_lids)
-        logging.getLogger("HWR").debug('no_of_lids %s ' %  self.no_of_lids)
-        self.no_of_baskets = self.get_property("no_of_baskets", self.default_no_of_baskets)
-        logging.getLogger("HWR").debug('no_of_baskets %s ' % self.no_of_baskets)
-        self.samples_per_basket = self.get_property("samples_per_basket", self.default_samples_per_basket)
-        logging.getLogger("HWR").debug('samples_per_basket %s ' % self.samples_per_basket)
-        self.do_detect_pucks = self.get_property('detect_pucks', SOLEILCats.DETECT_PUCKS)
-        logging.getLogger("HWR").debug('do_detect_pucks %s ' % self.do_detect_pucks)
-        self.use_update_timer = self.get_property('update_timer', True)
-        logging.getLogger("HWR").debug('use_update_timer %s ' % self.use_update_timer)
+        self.no_of_baskets = self.get_property(
+            "no_of_baskets", self.default_no_of_baskets
+        )
+        self.samples_per_basket = self.get_property(
+            "samples_per_basket", self.default_samples_per_basket
+        )
+        self.do_detect_pucks = self.get_property("detect_pucks", SOLEILCats.DETECT_PUCKS)
+        self.use_update_timer = False
         self.soak_lid = self.get_property("no_soak_lid", self.default_soak_lid)
-        logging.getLogger("HWR").debug('soak_lid %s ' % self.soak_lid)
-        
-        # find number of baskets and number of samples per basket
-        self.basket_types = [None] * self.no_of_baskets
-
-        # declare channels to detect basket presence changes
-        self.basket_channels = []
-      
-        # Create channels
-        # device_name, internal_name, update_method_name
-        channel_attributes = \
-            (
-                ("State", "State", "_update_state"),
-                ("Powered", "Powered", "_update_powered_state"),
-                ("PathRunning", "PathRunning", "_update_running_state"),
-                ("NumSampleOnDiff", "NumLoadedSample", "_update_loaded_sample"), 
-                ("LidSampleOnDiff", "LidLoadedSample", "_update_loaded_sample"), 
-                ("Barcode", "SampleBarcode", "_update_barcode"), 
-                ("di_AllLidsClosed", "AllLidsClosed", "_update_global_state"), 
-                ("Message", "Message", "_update_message"),
-                ("LN2Regulating", "LN2RegulationDewar1", "_update_regulation_state"),
-                ("Tool", "CurrentTool","_update_tool_state")
-            )
-        channel_attributes += tuple((("di_Lid%dOpen" % k, "lid%d_state" % k, "_update_lid%d_state" % k) for k in range(1, self.no_of_lids+1))) 
-        channel_attributes += tuple((("di_Cassette%dPresence" % k, "Basket%dState" % k, "_update_basket%d_state" % k) for k in range(1, self.no_of_baskets+1)))
-    
-        for channel_attribute in channel_attributes:
-            if type(channel_attribute) == tuple:
-                channel_name_in_device = channel_attribute[0]
-                _channel_name = "_chn%s" % channel_attribute[1]
-                channel_name = channel_attribute[1]
-                _update_method_name = channel_attribute[2]
-            else:
-                channel_name_in_device = channel_attribute
-                _channel_name = "_chn%s" % channel_attribute
-                channel_name = channel_attribute
-                _update_method_name = "_update_%s" % channel_attribute
-
-            channel = self.add_channel(
-                {
-                    "type": "tango",
-                    "name": channel_name,
-                    "tangoname": self.tangoname,
-                    "polling": self.polling,
-                },
-                 channel_name_in_device)
-            logging.getLogger("HWR").debug('adding channel %s %s' % (_channel_name, str(channel)))
-            setattr(self, _channel_name, channel)
-
-            if "Basket" in _channel_name or "Cassette" in _channel_name:
-                self.basket_channels.append(channel)
-            elif "status" in _channel_name.lower():
-                pass
-            elif "NumLoadedSample" in _channel_name:
-                pass
-            else:
-                handler = self._resolve_update_handler(_update_method_name)
-                logging.debug('connecting signal update from %s to %s' % (_channel_name, _update_method_name))
-                channel_object = getattr(self, _channel_name)
-                if channel_object is not None and handler is not None:
-                    handler(channel_object.get_value())
-                    channel_object.connect_signal("update", handler)
-                else:
-                    logging.warning('connecting signal update from %s to %s did not work' % (_channel_name, _update_method_name))
-            
-        command_attributes = \
-            (
-                ("Load", "put"),
-                ("Unload", "get"),
-                ("ChainedLoad", "getput"),
-                "Abort",
-                ("ScanSample", "barcode"),
-                "PowerOn",
-                "PowerOff",
-                "RegulOn",
-                "RegulOff",
-                "Reset",
-                "Back",
-                "Safe",
-                "Home",
-                ("Dry", "dry_soak"),
-                ("DrySoak", "dry_soak"),
-                "Soak",
-                ("ResetParameters", "reset_parameters"),
-                ("ClearMemory", "clear_memory"),
-                ("AckSampleMemory", "ack_sample_memory"),
-                "OpenTool",
-                "ToolCal",
-                "OpenLid1",
-                ("OpenLid2", "home_openlid2"),
-                "OpenLid3",
-                "CloseLid1",
-                "CloseLid2",
-                "CloseLid3",
-                # TODO confirm tango command names for the entries below against the CATS device
-                ("ResetMotion", "reset_motion"),
-                ("RecoverFailure", "recoverFailure"),
-                ("Calibration", "toolcalibration"),
-                ("SetOnDiff", "setondiff"),
-                ("MagnetOn", "magneton"),
-                ("MagnetOff", "magnetoff"),
-                ("ToolOpen", "opentool"),
-                ("ToolClose", "closetool"),
-                ("CloseTool", "closetool"),
-            )
-
-        for command_attribute in command_attributes:
-            if isinstance(command_attribute, tuple):
-                command_name = command_attribute[1]
-                _command_name = "_cmd%s" % command_attribute[0]
-            else:
-                command_name = command_attribute.lower()
-                _command_name = "_cmd%s" % command_attribute
-            command = self.add_command(
-                {
-                    "type": "tango",
-                    "name": _command_name,
-                    "tangoname": self.tangoname,
-                },
-                command_name,
-            )
-            setattr(self, _command_name, command)
-           
         self.cats_model = "CATS"
+        self.basket_types = [None] * self.no_of_baskets
         self.basket_presence = [True] * self.no_of_baskets
+        self.basket_channels = []
+
+        self._setup_channels_from_yaml()
+        self._setup_commands_from_yaml()
         self._init_sc_contents()
 
-        #
-        # connect channel signals to update info
-        #
-
-        self.use_update_timer = False  # do not use update_timer for Cats
-
-        # connect presence channels
-        if self.do_detect_pucks:
-            if self.basket_channels is not None:  # old device server
-                for basket_index in range(self.no_of_baskets):
-                    channel = self.basket_channels[basket_index]
-                    channel.connect_signal("update", self.cats_basket_presence_changed)
-            else:  # new device server with global CassettePresence attribute
-                self._chnBasketPresence.connect_signal("update", self.cats_baskets_changed)
-
-        # Read other XML properties
-        read_datamatrix = self.get_property("read_datamatrix")
-        if read_datamatrix:
+        if self.get_property("read_datamatrix"):
             self.set_read_barcode(True)
 
         unipuck_tool = self.get_property("unipuck_tool")
+        if unipuck_tool is not None:
+            try:
+                self.set_unipuck_tool(int(unipuck_tool))
+            except (TypeError, ValueError):
+                pass
+
+        # Final smoke test: confirm Tango DS responds. Raises if not.
+        self._probe_tango_connection()
+
+    # ------------------------------------------------------------------
+    # YAML channel/command wiring
+    # ------------------------------------------------------------------
+
+    def _setup_channels_from_yaml(self):
+        """Retrieve YAML-declared channels, connect handlers, and seed
+        their initial values.
+        """
+        log = logging.getLogger("HWR")
+
+        for channel_name, handler_name in self.CHANNEL_HANDLERS.items():
+            channel = self.get_channel_object(channel_name, optional=True)
+            if channel is None:
+                log.warning(
+                    "SOLEILCats: channel %s missing from YAML; skipping handler %s",
+                    channel_name,
+                    handler_name,
+                )
+                continue
+            setattr(self, channel_name, channel)
+            handler = getattr(self, handler_name, None)
+            if handler is None:
+                log.warning(
+                    "SOLEILCats: no handler %s for channel %s",
+                    handler_name,
+                    channel_name,
+                )
+                continue
+            try:
+                handler(channel.get_value())
+            except Exception as exc:
+                log.exception(
+                    "SOLEILCats: initial read failed for %s", channel_name
+                )
+                self._set_connection_state(
+                    "OFFLINE", "%s read failed: %s" % (channel_name, exc)
+                )
+            channel.connect_signal(
+                "update", self._wrap_handler(channel_name, handler)
+            )
+
+        # Per-sample channels (no auto-handler — read on demand)
+        for name in ("_chnNumLoadedSample", "_chnLidLoadedSample"):
+            channel = self.get_channel_object(name, optional=True)
+            if channel is None:
+                log.warning("SOLEILCats: channel %s missing from YAML", name)
+                continue
+            setattr(self, name, channel)
+
+        # Basket-presence channels — collected, connected only if pucks
+        # are being detected.
+        for index in range(1, self.no_of_baskets + 1):
+            channel_name = "_chnBasket%dState" % index
+            channel = self.get_channel_object(channel_name, optional=True)
+            if channel is None:
+                log.warning(
+                    "SOLEILCats: basket channel %s missing from YAML", channel_name
+                )
+                continue
+            setattr(self, channel_name, channel)
+            self.basket_channels.append(channel)
+
+        if self.do_detect_pucks:
+            for channel in self.basket_channels:
+                channel.connect_signal("update", self.cats_basket_presence_changed)
+
+    def _setup_commands_from_yaml(self):
+        log = logging.getLogger("HWR")
+        # All CMD_NAMES referenced by SOLEILCats methods or by send_command.
+        cmd_names = (
+            "_cmdLoad",
+            "_cmdUnload",
+            "_cmdChainedLoad",
+            "_cmdAbort",
+            "_cmdScanSample",
+            "_cmdPowerOn",
+            "_cmdPowerOff",
+            "_cmdRegulOn",
+            "_cmdRegulOff",
+            "_cmdReset",
+            "_cmdBack",
+            "_cmdSafe",
+            "_cmdHome",
+            "_cmdDry",
+            "_cmdDrySoak",
+            "_cmdSoak",
+            "_cmdResetParameters",
+            "_cmdClearMemory",
+            "_cmdAckSampleMemory",
+            "_cmdOpenTool",
+            "_cmdCloseTool",
+            "_cmdToolCal",
+            "_cmdOpenLid1",
+            "_cmdCloseLid1",
+            "_cmdOpenLid2",
+            "_cmdCloseLid2",
+            "_cmdOpenLid3",
+            "_cmdCloseLid3",
+            "_cmdResetMotion",
+            "_cmdRecoverFailure",
+            "_cmdCalibration",
+            "_cmdSetOnDiff",
+            "_cmdMagnetOn",
+            "_cmdMagnetOff",
+            "_cmdToolOpen",
+            "_cmdToolClose",
+        )
+        for name in cmd_names:
+            cmd = self.get_command_object(name)
+            if cmd is None:
+                log.warning("SOLEILCats: command %s missing from YAML", name)
+            setattr(self, name, cmd)
+
+    # ------------------------------------------------------------------
+    # Connection-health tracking
+    # ------------------------------------------------------------------
+
+    def _set_connection_state(self, new_state, detail=""):
+        """Update the connection-health flag and emit a signal on change."""
+        if new_state == self._connection_state:
+            return
+        self._connection_state = new_state
+        logging.getLogger("HWR").warning(
+            "SOLEILCats: connection state -> %s (%s)", new_state, detail
+        )
         try:
-            unipuck_tool = int(unipuck_tool)
-            if unipuck_tool:
-                self.set_unipuck_tool(unipuck_tool)
+            self.emit("connectionStateChanged", (new_state, detail))
         except Exception:
-            pass
+            logging.getLogger("HWR").exception(
+                "SOLEILCats: failed to emit connectionStateChanged"
+            )
+
+    def _probe_tango_connection(self):
+        """One-shot Tango health probe. Raises if the CATS DS is unreachable.
+
+        Called at the end of init() so a downed DS makes mxcube startup fail
+        loudly with a clear error pointing at the SC, instead of degrading
+        silently into "no state ever changes".
+        """
+        chn = getattr(self, "_chnState", None)
+        if chn is None:
+            self._set_connection_state(
+                "OFFLINE", "channel _chnState not configured in YAML"
+            )
+            raise RuntimeError(
+                "SOLEILCats: _chnState channel missing — check YAML and Tango DS"
+            )
+        try:
+            value = chn.get_value()
+        except Exception as exc:
+            self._set_connection_state(
+                "OFFLINE", "Tango read failed: %s" % exc
+            )
+            raise RuntimeError(
+                "SOLEILCats: Tango DS unreachable (read of _chnState failed: %s)"
+                % exc
+            ) from exc
+        self._set_connection_state(
+            "ONLINE", "Tango DS responsive (state=%s)" % value
+        )
+
+    def _wrap_handler(self, channel_name, handler):
+        """Wrap a channel update handler so successful invocations refresh
+        the ONLINE state and exceptions flip OFFLINE — without dropping
+        the update.
+        """
+
+        def wrapped(value):
+            try:
+                handler(value)
+            except Exception as exc:
+                logging.getLogger("HWR").exception(
+                    "SOLEILCats: handler for %s raised", channel_name
+                )
+                self._set_connection_state(
+                    "OFFLINE",
+                    "%s update raised: %s" % (channel_name, exc),
+                )
+                return
+            if self._connection_state != "ONLINE":
+                self._set_connection_state(
+                    "ONLINE", "channel %s recovered" % channel_name
+                )
+
+        return wrapped
+
+    def check_connection(self):
+        """Public health probe. Returns ``(is_ok: bool, detail: str)``.
+
+        Safe to call from the maintenance UI or a watchdog. Performs a single
+        Tango read of ``_chnState`` and updates ``_connection_state``.
+        """
+        chn = getattr(self, "_chnState", None)
+        if chn is None:
+            self._set_connection_state(
+                "OFFLINE", "channel _chnState not configured"
+            )
+            return False, "channel _chnState not configured"
+        try:
+            chn.get_value()
+        except Exception as exc:
+            self._set_connection_state("OFFLINE", str(exc))
+            return False, str(exc)
+        self._set_connection_state("ONLINE", "")
+        return True, "OK"
+
+    # ------------------------------------------------------------------
+    # Basket / sample bookkeeping
+    # ------------------------------------------------------------------
 
     def get_basket_list(self):
         basket_list = []
@@ -269,27 +408,22 @@ class SOLEILCats(Cats90):
         for basket in self.get_components():
             if isinstance(basket, Basket):
                 basket._name = dewar_content[k]
-                k+=1
+                k += 1
                 basket_list.append(basket)
         return basket_list
-    
+
     def _get_by_address(self, address):
         try:
-            component = self.component_by_adddress[address]
+            return self.component_by_address[address]
         except KeyError:
             component = self.get_component_by_address(address)
-            self.component_by_adddress[address] = component
-        return component 
-    
-    def _init_sc_contents(self, separator="_"):
-        """
-        Initializes the sample changer content with default values.
+            self.component_by_address[address] = component
+            return component
 
-        :returns: None
-        :rtype: None
-        """
-        _start = time.time()
-        logging.getLogger("HWR").info("initializing contents self %s" % self)
+    def _init_sc_contents(self, separator="_"):
+        """Initialise sample-changer contents with default values."""
+        start = time.time()
+        logging.getLogger("HWR").info("SOLEILCats: initialising contents")
 
         for i in range(self.no_of_baskets):
             if self.basket_types[i] == BASKET_SPINE:
@@ -297,478 +431,269 @@ class SOLEILCats(Cats90):
             elif self.basket_types[i] == BASKET_UNIPUCK:
                 basket = UnipuckBasket(self, i + 1)
             else:
-                basket = SoleilPuck(self, i + 1, samples_num=self.samples_per_basket, parent=self)
-
+                basket = SoleilPuck(
+                    self,
+                    i + 1,
+                    samples_num=self.samples_per_basket,
+                    parent=self,
+                )
             self._add_component(basket)
-            self.component_by_adddress[basket.get_address()] = basket
-            
-        # write the default basket information into permanent Basket objects
+            self.component_by_address[basket.get_address()] = basket
+
         for basket_index in range(self.no_of_baskets):
             basket = self.get_components()[basket_index]
-            datamatrix = None
-            present = scanned = False
-            basket._set_info(present, datamatrix, scanned)
+            basket._set_info(False, None, False)
 
-        # create temporary list with default sample information and indices
-        sample_list = []
         for basket_index in range(self.no_of_baskets):
             basket = self.get_components()[basket_index]
             for sample_index in range(basket.get_number_of_samples()):
-                sample_list.append(
-                    ("", basket_index + 1, sample_index + 1, 1, Pin.STD_HOLDERLENGTH)
+                address = "%d%s%02d" % (
+                    basket_index + 1,
+                    separator,
+                    sample_index + 1,
                 )
+                sample = self._get_by_address(address)
+                sample._set_info(False, None, False)
+                sample._set_loaded(False, False)
+                sample._set_holder_length(Pin.STD_HOLDERLENGTH)
 
-        # write the default sample information into permanent Pin objects
-        for spl in sample_list:
-            address = "%d%s%02d" % (spl[1], separator, spl[2])
-            sample = self._get_by_address(address)
-            datamatrix = None
-            present = scanned = loaded = _has_been_loaded = False
-            sample._set_info(present, datamatrix, scanned)
-            sample._set_loaded(loaded, _has_been_loaded)
-            sample._set_holder_length(spl[4])
+        logging.getLogger("HWR").info(
+            "SOLEILCats: contents initialised in %.3fs", time.time() - start
+        )
 
-        logging.getLogger("HWR").info("initializing contents took %.6f" % (time.time()-_start))
-        
     def _do_update_cats_contents(self, separator="_"):
-        """
-        Updates the sample changer content. The state of the puck positions are
-        read from the respective channels in the CATS Tango DS.
-        The CATS sample sample does not have an detection of each individual sample, so all
-        samples are flagged as 'Present' if the respective puck is mounted.
-
-        :returns: None
-        :rtype: None
-        """
-
         for basket_index in range(self.no_of_baskets):
-            # get presence information from the device server
             if self.do_detect_pucks:
                 channel = self.basket_channels[basket_index]
                 is_present = channel.get_value()
             else:
                 is_present = True
             self.basket_presence[basket_index] = is_present
-
         self._update_cats_contents(separator=separator)
-    
+
     def _update_cats_contents(self, separator="_"):
-        _start = time.time()
+        start = time.time()
         logging.getLogger("HWR").info(
-            "Updating contents %s" % str(self.basket_presence)
+            "SOLEILCats: updating contents %s", self.basket_presence
         )
         for basket_index in range(self.no_of_baskets):
-            # get saved presence information from object's internal bookkeeping
             basket = self.get_components()[basket_index]
             is_present = self.basket_presence[basket_index]
-
             if is_present is None:
                 continue
-
-            # check if the basket presence has changed
             if is_present ^ basket.is_present():
-                # a mounting action was detected ...
-                if is_present:
-                    # basket was mounted
-                    present = True
-                    scanned = False
-                    datamatrix = None
-                    basket._set_info(present, datamatrix, scanned)
-                else:
-                    # basket was removed
-                    present = False
-                    scanned = False
-                    datamatrix = None
-                    basket._set_info(present, datamatrix, scanned)
-
-                # set the information for all dependent samples
+                datamatrix = None
+                basket._set_info(is_present, datamatrix, False)
                 for sample_index in range(basket.get_number_of_samples()):
-                    address = Pin.get_sample_address((basket_index + 1), (sample_index + 1), separator=separator)
+                    address = Pin.get_sample_address(
+                        basket_index + 1, sample_index + 1, separator=separator
+                    )
                     sample = self._get_by_address(address)
-                        
                     present = sample.get_container().is_present()
-                    if present:
-                        datamatrix = "          "
-                    else:
-                        datamatrix = None
-                    scanned = False
-                    sample._set_info(present, datamatrix, scanned)
-
-                    # forget about any loaded state in newly mounted or removed basket)
-                    loaded = _has_been_loaded = False
-                    sample._set_loaded(loaded, _has_been_loaded)
+                    matrix = "          " if present else None
+                    sample._set_info(present, matrix, False)
+                    sample._set_loaded(False, False)
 
         self._trigger_contents_updated_event()
         self._update_loaded_sample()
-        logging.getLogger("HWR").debug('_update_cats_contents took %.6f' % (time.time() - _start))
-        
+        logging.getLogger("HWR").debug(
+            "SOLEILCats: _update_cats_contents took %.3fs", time.time() - start
+        )
+
+    # ------------------------------------------------------------------
+    # Power / load / unload
+    # ------------------------------------------------------------------
+
     def check_power_on(self):
         if not self._chnPowered.get_value():
-            logging.getLogger().info("CATS power is not enabled. Switching on the arm power ...")
+            logging.getLogger().info("SOLEILCats: powering on the arm")
             try:
                 self.cats_api.on()
-            except:
-                logging.getLogger('HWR').info('in powerOn exception %s' % traceback.format_exc())
+            except Exception:
+                logging.getLogger("HWR").info(
+                    "SOLEILCats: powerOn exception %s", traceback.format_exc()
+                )
 
     def load(self, separator="_", sample=None, wait=True):
-        """
-        Load a sample.
-            overwrite original load() from AbstractSampleChanger to allow finer decision
-            on command to use (with or without barcode / or allow for wash in some cases)
-            Implement that logic in _do_load()
-            Add initial verification about the Powered:
-            (NOTE) In fact should be already as the power is considered in the state handling
-        """
-
-        self._update_state()  # remove software flags like Loading.
-        logging.getLogger().info('in load')
+        self._update_state()
+        logging.getLogger().info("SOLEILCats: load")
         self.assert_not_charging()
         self.check_power_on()
         location = sample
-        logging.getLogger('HWR').info('load, location %s' % str(location))
+        logging.getLogger("HWR").info("SOLEILCats: load location %s", location)
 
-        if type(location) == str:
+        if isinstance(location, str):
             puck, sample = map(int, location.split(separator))
         else:
             puck, sample = location
-            
-        lid = (puck - 1) / self.no_of_lids + 1
-        sample_in_lid = ((puck - 1) % self.no_of_lids) * self.samples_per_basket + sample
-        lid = int(lid)
-        sample_in_lid = int(sample_in_lid)
-        logging.getLogger('HWR').info('load, puck %d, sample %d (lid: %d, sample in lid: %d)' % (puck, sample, lid, sample_in_lid))
-        
+
+        lid = (puck - 1) // self.no_of_lids + 1
+        sample_in_lid = (
+            ((puck - 1) % self.no_of_lids) * self.samples_per_basket + sample
+        )
+        logging.getLogger("HWR").info(
+            "SOLEILCats: load puck=%d sample=%d (lid=%d, sample_in_lid=%d)",
+            puck,
+            sample,
+            lid,
+            sample_in_lid,
+        )
         self.cats_api.getput(lid, sample_in_lid, wait=True)
         self._trigger_info_changed_event()
 
     def unload(self, sample_slot=None, wait=True):
-        logging.getLogger().info('in unload')
+        logging.getLogger().info("SOLEILCats: unload")
         self.assert_not_charging()
         self.check_power_on()
         self.cats_api.get(wait=True)
- 
+
     def _update_loaded_sample(self, sample_num=None, lid=None, separator="_"):
-        _start = time.time()
-        if None in [sample_num, lid]:
-            loadedSampleNum = self._chnNumLoadedSample.get_value()
-            loadedSampleLid = self._chnLidLoadedSample.get_value()
+        start = time.time()
+        if None in (sample_num, lid):
+            loaded_num = self._chnNumLoadedSample.get_value()
+            loaded_lid = self._chnLidLoadedSample.get_value()
         else:
-            loadedSampleNum = sample_num
-            loadedSampleLid = lid
+            loaded_num = sample_num
+            loaded_lid = lid
 
-        self.cats_loaded_lid = loadedSampleLid
-        self.cats_loaded_num = loadedSampleNum
+        self.cats_loaded_lid = loaded_lid
+        self.cats_loaded_num = loaded_num
 
-        logging.getLogger("HWR").debug(
-            "Updating loaded sample %d%s%02d" % (loadedSampleLid, separator, loadedSampleNum)
-        )
-
-        if -1 not in [loadedSampleLid, loadedSampleNum]:
-            basket, sample = self.lidsample_to_basketsample(
-                loadedSampleLid, loadedSampleNum
-            )
+        if -1 not in (loaded_lid, loaded_num):
+            basket, sample = self.lidsample_to_basketsample(loaded_lid, loaded_num)
             address = "%d%s%02d" % (basket, separator, sample)
             new_sample = self._get_by_address(address)
         else:
-            basket, sample = None, None
+            basket = sample = None
             new_sample = None
-            address="None"
-            
-        logging.getLogger("HWR").info(
-            "Updating loaded sample %s" % (address)
-        )
-        
-        logging.getLogger("HWR").debug(
-            "about to call get_loaded_sample")
+            address = "None"
+
+        logging.getLogger("HWR").info("SOLEILCats: loaded sample %s", address)
         old_sample = self.get_loaded_sample(puck=basket, sample=sample)
-        
-        logging.getLogger("HWR").debug(
-            "get_loaded_sample returned %s" % old_sample)
-        
-        logging.getLogger("HWR").debug(
-            "new_sample is %s" % new_sample)
+
         if old_sample != new_sample:
-            # remove 'loaded' flag from old sample but keep all other information
-
             if old_sample is not None:
-                # there was a sample on the gonio
-                loaded = False
-                has_been_loaded = True
-                old_sample._set_loaded(loaded, has_been_loaded)
-
+                old_sample._set_loaded(False, True)
             if new_sample is not None:
-                loaded = True
-                has_been_loaded = True
-                new_sample._set_loaded(loaded, has_been_loaded)
-
+                new_sample._set_loaded(True, True)
             if (
-                (old_sample is None)
-                or (new_sample is None)
-                or (old_sample.get_address() != new_sample.get_address())
+                old_sample is None
+                or new_sample is None
+                or old_sample.get_address() != new_sample.get_address()
             ):
                 self._trigger_loaded_sample_changed_event(new_sample)
                 self._trigger_info_changed_event()
         self._trigger_info_changed_event()
-        logging.getLogger('HWR').debug('_update_loaded_sample took %.4f' % (time.time() - _start))
-    
+        logging.getLogger("HWR").debug(
+            "SOLEILCats: _update_loaded_sample took %.3fs", time.time() - start
+        )
+
     def cats_state_changed(self, value=None):
-        logging.debug('cats_state_changed %s' % value)
+        logging.debug("SOLEILCats: state_changed %s", value)
         self.cats_state = value
         self._update_state()
-        
+
     def has_loaded_sample(self):
         return self.goniometer.sample_is_loaded()
-    
+
     def get_loaded_sample(self, separator="_", puck=None, sample=None):
         if puck is None or sample is None:
-            logging.getLogger("HWR").debug('in get_loaded_sample, querying cats device for NumLoadedSample and LidLoadedSample')
-            loadedSampleNum = int(self._chnNumLoadedSample.get_value())
-            loadedSampleLid = int(self._chnLidLoadedSample.get_value())
-            logging.getLogger("HWR").debug('NumLoadedSample %d, LidLoadedSample %d' % (loadedSampleNum, loadedSampleLid))
-            puck, sample = self.lidsample_to_basketsample(
-                loadedSampleLid, loadedSampleNum
-            )
-            if loadedSampleLid is None or loadedSampleLid is None:
-                logging.getLogger("HWR").info('in get_loaded_sample, querying cats_api get_mounted_puck_and_sample')
+            loaded_num = int(self._chnNumLoadedSample.get_value())
+            loaded_lid = int(self._chnLidLoadedSample.get_value())
+            puck, sample = self.lidsample_to_basketsample(loaded_lid, loaded_num)
+            if loaded_lid is None:
                 puck, sample = self.cats_api.get_mounted_puck_and_sample()
-                logging.getLogger("HWR").info('sample %d, puck %d' % (sample, puck))
-            
-        address = '%d%s%02d' % (puck, separator, sample)
-        logging.getLogger("HWR").debug('in get_loaded_sample, address %s' % address)
+        address = "%d%s%02d" % (puck, separator, sample)
         return self.get_component_by_address(address)
 
     def assert_not_charging(self):
-        """
-        Raises:
-            (Exception): If sample changer is not charging
-        """
         if self.cats_running:
             raise Exception("Sample Changer is in Charging mode")
-        
-        
-    ### from CatsMaint
-    ################################################################################
+
+    # ------------------------------------------------------------------
+    # MAINTENANCE TRAJECTORIES — exposed via SOLEILCatsMaint proxy
+    # ------------------------------------------------------------------
 
     def back_traj(self):
-        """
-        Moves a sample from the gripper back into the dewar to its logged position.
-        """
         return self._execute_task(False, self._do_back)
 
     def safe_traj(self):
-        """
-        Safely Moves the robot arm and the gripper to the home position
-        """
         return self._execute_task(False, self._do_safe)
 
     def _do_abort(self):
-        """
-        Launch the "abort" trajectory on the CATS Tango DS
-
-        :returns: None
-        :rtype: None
-        """
         self._cmdAbort()
 
     def _do_home(self):
-        """
-        Launch the "abort" trajectory on the CATS Tango DS
-
-        :returns: None
-        :rtype: None
-        """
-        tool = self.get_current_tool()
-        self._cmdHome(tool)
+        self._cmdHome(self.get_current_tool())
 
     def _do_reset(self):
-        """
-        Launch the "reset" command on the CATS Tango DS
-
-        :returns: None
-        :rtype: None
-        """
-        logging.getLogger("HWR").debug("CatsMaint. doing reset")
+        logging.getLogger("HWR").debug("SOLEILCats: reset (no-op)")
         return
-        self._cmdReset()
 
     def _do_reset_memory(self):
-        """
-        Launch the "reset memory" command on the CATS Tango DS
-
-        :returns: None
-        :rtype: None
-        """
         self._cmdClearMemory()
         gevent.sleep(1)
         self._cmdResetParameters()
         gevent.sleep(1)
 
     def _do_reset_motion(self):
-        """
-        Launch the "reset_motion" command on the CATS Tango DS
-
-        :returns: None
-        :rtype: None
-        """
         self._cmdResetMotion()
 
     def _do_recover_failure(self):
-        """
-        Launch the "recoverFailure" command on the CATS Tango DS
-
-        :returns: None
-        :rtype: None
-        """
         self._cmdRecoverFailure()
 
     def _do_calibration(self):
-        """
-        Launch the "toolcalibration" command on the CATS Tango DS
-
-        :returns: None
-        :rtype: None
-        """
-        tool = self.get_current_tool()
-        self._cmdCalibration([tool])
+        self._cmdCalibration([self.get_current_tool()])
 
     def _do_open_tool(self):
-        """
-        Launch the "opentool" command on the CATS Tango DS
-
-        :returns: None
-        :rtype: None
-        """
         self._cmdOpenTool()
 
     def _do_close_tool(self):
-        """
-        Launch the "closetool" command on the CATS Tango DS
-
-        :returns: None
-        :rtype: None
-        """
         self._cmdCloseTool()
 
     def _do_dry_gripper(self):
-        """
-        Launch the "dry" command on the CATS Tango DS
+        self._cmdDrySoak([str(self.get_current_tool()), str(self.soak_lid)])
 
-        :returns: None
-        :rtype: None
-        """
-        tool = self.get_current_tool()
-        self._cmdDrySoak([str(tool), str(self.soak_lid)])
-
-        
     def _do_set_on_diff(self, sample):
-        """
-        Launch the "setondiff" command on the CATS Tango DS, an example of sample value is 2:05
-
-        :returns: None
-        :rtype: None
-        """
-
         if sample is None:
             raise Exception("No sample selected")
-        else:
-            str_tmp = str(sample)
-            sample_tmp = str_tmp.split(":")
-            # calculate CATS specific lid/sample number
-            lid = (int(sample_tmp[0]) - 1) / 3 + 1
-            puc_pos = ((int(sample_tmp[0]) - 1) % 3) * 10 + int(sample_tmp[1])
-            argin = [str(lid), str(puc_pos), "0"]
-            logging.getLogger().info("to SetOnDiff %s", argin)
-            self._execute_server_task(self._cmdSetOnDiff, argin)
+        parts = str(sample).split(":")
+        lid = (int(parts[0]) - 1) // 3 + 1
+        puc_pos = ((int(parts[0]) - 1) % 3) * 10 + int(parts[1])
+        argin = [str(lid), str(puc_pos), "0"]
+        logging.getLogger().info("SOLEILCats: SetOnDiff %s", argin)
+        self._execute_server_task(self._cmdSetOnDiff, argin)
 
     def _do_back(self):
-        """
-        Launch the "back" trajectory on the CATS Tango DS
-
-        :returns: None
-        :rtype: None
-        """
-        tool = self.get_current_tool()
-        argin = [str(tool), "0"]  # to send string array with two arg...
+        argin = [str(self.get_current_tool()), "0"]
         self._execute_server_task(self._cmdBack, argin)
 
     def _do_safe(self):
-        """
-        Launch the "safe" trajectory on the CATS Tango DS
-
-        :returns: None
-        :rtype: None
-        """
-        argin = self.get_current_tool()
-        self._execute_server_task(self._cmdSafe, argin)
+        self._execute_server_task(self._cmdSafe, self.get_current_tool())
 
     def _do_power_state(self, state=False):
-        """
-        Switch on CATS power if >state< == True, power off otherwise
-
-        :returns: None
-        :rtype: None
-        """
-        logging.getLogger("HWR").debug("   running power state command ")
         if state:
             self._cmdPowerOn()
         else:
             self._cmdPowerOff()
 
-
     def _do_enable_regulation(self):
-        """
-        Switch on CATS regulation
-
-        :returns: None
-        :rtype: None
-        """
         self._cmdRegulOn()
 
     def _do_disable_regulation(self):
-        """
-        Switch off CATS regulation
-
-        :returns: None
-        :rtype: None
-        """
         self._cmdRegulOff()
 
     def _do_lid1_state(self, state=True):
-        """
-        Opens lid 1 if >state< == True, closes the lid otherwise
-
-        :returns: None
-        :rtype: None
-        """
-        if state:
-            self._execute_server_task(self._cmdOpenLid1)
-        else:
-            self._execute_server_task(self._cmdCloseLid1)
+        cmd = self._cmdOpenLid1 if state else self._cmdCloseLid1
+        self._execute_server_task(cmd)
 
     def _do_lid2_state(self, state=True):
-        """
-        Opens lid 2 if >state< == True, closes the lid otherwise
-
-        :returns: None
-        :rtype: None
-        """
-        if state:
-            self._execute_server_task(self._cmdOpenLid2)
-        else:
-            self._execute_server_task(self._cmdCloseLid2)
+        cmd = self._cmdOpenLid2 if state else self._cmdCloseLid2
+        self._execute_server_task(cmd)
 
     def _do_lid3_state(self, state=True):
-        """
-        Opens lid 3 if >state< == True, closes the lid otherwise
-
-        :returns: None
-        :rtype: None
-        """
-        logging.debug('_do_lid3_state state %s' % state)
-        if state:
-            self._execute_server_task(self._cmdOpenLid3)
-        else:
-            self._execute_server_task(self._cmdCloseLid3)
+        cmd = self._cmdOpenLid3 if state else self._cmdCloseLid3
+        self._execute_server_task(cmd)
 
     def _do_magnet_on(self):
         self._execute_server_task(self._cmdMagnetOn)
@@ -782,28 +707,22 @@ class SOLEILCats(Cats90):
     def _do_tool_close(self):
         self._execute_server_task(self._cmdToolClose)
 
-    # ########################          PROTECTED          #########################
+    # ------------------------------------------------------------------
+    # PROTECTED / PRIVATE
+    # ------------------------------------------------------------------
 
     def _execute_task(self, wait, method, *args):
         ret = self._run(method, wait=False, *args)
         if wait:
             return ret.get()
-        else:
-            return ret
-
-    @task #--Martin 
-    def _run(self, method, *args):
-        exception = None
-        ret = None
-        try:
-            ret = method(*args)
-        except Exception as ex:
-            exception = ex
-        if exception is not None:
-            raise exception
         return ret
 
-    # ########################           PRIVATE           #########################
+    @task
+    def _run(self, method, *args):
+        try:
+            return method(*args)
+        except Exception:
+            raise
 
     def _update_running_state(self, value):
         self._running = value
@@ -835,7 +754,7 @@ class SOLEILCats(Cats90):
         self.emit("barcodeChanged", (value,))
 
     def _update_state(self, value=None, value2=None):
-        logging.debug('_update_state %s, %s' % (value, value2))
+        logging.debug("SOLEILCats: _update_state %s %s", value, value2)
         self._state = value
         self._update_global_state()
 
@@ -857,57 +776,25 @@ class SOLEILCats(Cats90):
         self.emit("basket%dStateChanged" % index, (value,))
         self._update_global_state()
 
-    def _resolve_update_handler(self, name):
-        """Return a callable for ``name``, generating per-index handlers for
-        _update_lid<N>_state / _update_basket<N>_state when no concrete
-        method exists."""
-        handler = getattr(self, name, None)
-        if handler is not None:
-            return handler
-        import re
-        m = re.match(r"_update_lid(\d+)_state$", name)
-        if m:
-            idx = int(m.group(1))
-            return lambda value, i=idx: self._update_lid_state(i, value)
-        m = re.match(r"_update_basket(\d+)_state$", name)
-        if m:
-            idx = int(m.group(1))
-            return lambda value, i=idx: self._update_basket_state(i, value)
-        return None
-
     def _update_operation_mode(self, value):
         self._charging = not value
 
     def _update_global_state(self, *args):
-        logging.debug("_update_global_state %s" % str(args))
         state_dict, cmd_state, message = self.get_global_state()
         self.emit("globalStateChanged", (state_dict, cmd_state, message))
 
     def get_global_state(self):
-        """
-           Update clients with a global state that
-           contains different:
+        """Snapshot of state, command-availability flags, and message."""
+        offline = self._connection_state == "OFFLINE"
+        ready = (not offline) and str(self._state) in ("READY", "ON")
 
-           - first param (state_dict):
-               collection of state bits
-
-           - second param (cmd_state):
-               list of command identifiers and the
-               status of each of them True/False
-               representing whether the command is
-               currently available or not
-
-           - message
-               a message describing current state information
-               as a string
-        """
-        _ready = str(self._state) in ("READY", "ON")
-
-        if self._running:
+        if offline:
+            state_str = "OFFLINE"
+        elif self._running:
             state_str = "MOVING"
-        elif not (self._powered) and _ready:
+        elif not self._powered and ready:
             state_str = "DISABLED"
-        elif _ready:
+        elif ready:
             state_str = "READY"
         else:
             state_str = str(self._state)
@@ -921,84 +808,56 @@ class SOLEILCats(Cats90):
             "lid2": self._lid2state,
             "lid3": self._lid3state,
             "state": state_str,
+            "connection": self._connection_state,
         }
 
+        # When offline, disable every action — calling them would raise
+        # at the Tango layer anyway and confuse the UI further.
         cmd_state = {
-            "powerOn": (not self._powered) and _ready,
-            "powerOff": (self._powered) and _ready,
-            "regulon": (not self._regulating) and _ready,
-            "openlid1": (not self._lid1state) and self._powered and _ready,
-            "closelid1": self._lid1state and self._powered and _ready,
-            "dry": (not self._running) and self._powered and _ready,
-            "soak": (not self._running) and self._powered and _ready,
-            "home": (not self._running) and self._powered and _ready,
-            "back": (not self._running) and self._powered and _ready,
-            "safe": (not self._running) and self._powered and _ready,
-            "clear_memory": True,
-            "reset": True,
-            "abort": True,
+            "powerOn": (not self._powered) and ready,
+            "powerOff": self._powered and ready,
+            "regulon": (not self._regulating) and ready,
+            "openlid1": (not self._lid1state) and self._powered and ready,
+            "closelid1": self._lid1state and self._powered and ready,
+            "dry": (not self._running) and self._powered and ready,
+            "soak": (not self._running) and self._powered and ready,
+            "home": (not self._running) and self._powered and ready,
+            "back": (not self._running) and self._powered and ready,
+            "safe": (not self._running) and self._powered and ready,
+            "clear_memory": not offline,
+            "reset": not offline,
+            "abort": not offline,
         }
 
-        message = self._message
-        logging.debug('get_global_state %s %s %s' % (state_dict, cmd_state, message))
+        message = (
+            "Sample changer OFFLINE — Tango/PyCATS unreachable"
+            if offline
+            else self._message
+        )
         return state_dict, cmd_state, message
 
     def re_emit_values(self):
-        channel_attributes = \
-            (
-                ("State", "State", "_update_state"),
-                ("Powered", "Powered", "_update_powered_state"),
-                ("PathRunning", "PathRunning", "_update_running_state"),
-                ("NumSampleOnDiff", "NumLoadedSample", "_update_loaded_sample"), 
-                ("Barcode", "SampleBarcode", "_update_barcode"), 
-                ("di_AllLidsClosed", "AllLidsClosed", "_update_global_state"), 
-                ("Message", "Message", "_update_message"),
-                ("LN2Regulating", "LN2RegulationDewar1", "_update_regulation_state"),
-                ("Tool", "CurrentTool","_update_tool_state")
-            )
-        channel_attributes += tuple((("di_Lid%dOpen" % k, "lid%d_state" % k, "_update_lid%d_state" % k) for k in range(1, self.no_of_lids+1)))
-        channel_attributes += tuple((("di_Cassette%dPresence" % k, "Basket%dState" % k, "_update_basket%d_state" % k) for k in range(1, self.no_of_baskets+1)))
-    
-        for channel_attribute in channel_attributes:
-            if type(channel_attribute) == tuple:
-                channel_name_in_device = channel_attribute[0]
-                _channel_name = "_chn%s" % channel_attribute[1]
-                channel_name = channel_attribute[1]
-                _update_method_name = channel_attribute[2]
-            else:
-                channel_name_in_device = channel_attribute
-                _channel_name = "_chn%s" % channel_attribute
-                channel_name = channel_attribute
-                _update_method_name = "_update_%s" % channel_attribute
-                
-            if "Basket" in _channel_name or "Cassette" in _channel_name:
-                pass
-            elif "status" in _channel_name.lower():
-                pass
-            elif "NumLoadedSample" in _channel_name:
-                pass            
-            else:
-                handler = self._resolve_update_handler(_update_method_name)
-                channel_object = getattr(self, _channel_name)
-                if channel_object is not None and handler is not None:
-                    handler(channel_object.get_value())
-                else:
-                    logging.info('connecting signal update from %s to %s did not work' % (_channel_name, _update_method_name))
-                    
+        for channel_name, handler_name in self.CHANNEL_HANDLERS.items():
+            channel = getattr(self, channel_name, None)
+            handler = getattr(self, handler_name, None)
+            if channel is None or handler is None:
+                continue
+            try:
+                handler(channel.get_value())
+            except Exception:
+                logging.getLogger("HWR").exception(
+                    "SOLEILCats: re_emit_values failed for %s", channel_name
+                )
+
     def get_cmd_info(self):
-        """ return information about existing commands for this object
-           the information is organized as a list
-           with each element contains
-           [ cmd_name,  display_name, category ]
-        """
-        """ [cmd_id, cmd_display_name, nb_args, cmd_category, description ] """
-        cmd_list = [
+        """Maintenance UI button structure."""
+        return [
             [
                 "Power",
                 [
                     ["powerOn", "PowerOn", "Switch Power On"],
                     ["powerOff", "PowerOff", "Switch Power Off"],
-                    ["regulon", "Regulation On", "Swich LN2 Regulation On"],
+                    ["regulon", "Regulation On", "Switch LN2 Regulation On"],
                 ],
             ],
             [
@@ -1022,68 +881,60 @@ class SOLEILCats(Cats90):
                     [
                         "clear_memory",
                         "Clear Memory",
-                        "Clear Info in Robot Memory "
-                        " (includes info about sample on Diffr)",
+                        "Clear info in robot memory (incl. sample on diffr)",
                     ],
-                    ["reset", "Reset Message", "Reset Cats State"],
-                    ["back", "Back", "Reset Cats State"],
-                    ["safe", "Safe", "Reset Cats State"],
+                    ["reset", "Reset Message", "Reset CATS state"],
+                    ["back", "Back", "Move sample back into dewar"],
+                    ["safe", "Safe", "Move arm to safe position"],
                 ],
             ],
-            ["Abort", [["abort", "Abort", "Abort Execution of Command"]]],
+            ["Abort", [["abort", "Abort", "Abort execution of command"]]],
         ]
-        return cmd_list
 
     def _execute_server_task(self, method, *args):
-        logging.debug("_execute_server_task method %s" % method)
-        task_id = method(*args)
-        ret = None
-        # introduced wait because it takes some time before the attribute PathRunning is set
-        # after launching a transfer
-        # after setting refresh in the Tango DS to 0.1 s a wait of 1s is enough
+        method(*args)
         gevent.sleep(1.0)
         while str(self._chnPathRunning.get_value()).lower() == "true":
             gevent.sleep(0.1)
-        ret = True
-        return ret
+        return True
 
     def send_command(self, cmd_name, args=None):
-        lid = 1
-        toolcal = 0
+        """Dispatch a UI-named command (powerOn, openlid1, soak, ...) to
+        the underlying framework command.
+        """
+        attr = self.UI_COMMAND_MAP.get(cmd_name)
+        if attr is None:
+            raise Exception("Unknown sample-changer command: %s" % cmd_name)
+        cmd = getattr(self, attr, None)
+        if cmd is None:
+            raise Exception("Command %s not configured in YAML" % attr)
+
         tool = self.get_current_tool()
 
-        if cmd_name in ["dry", "safe", "home"]:
-            if tool is not None:
+        if cmd_name in ("dry", "safe", "home"):
+            if tool is None:
+                raise Exception(
+                    "Cannot detect TOOL type. %s ignored." % cmd_name
+                )
+            if args is None:
                 args = [tool]
-            else:
-                raise Exception("Cannot detect type of TOOL in Cats. Command ignored")
-
-        if cmd_name == "soak":
-            if tool in [TOOL_DOUBLE, TOOL_UNIPUCK]:
-                args = [str(tool), str(lid)]
-            else:
-                raise Exception("Can SOAK only when UNIPUCK tool is mounted")
-
-        if cmd_name == "back":
-            if tool is not None:
-                args = [tool, toolcal]
-            else:
-                raise Exception("Cannot detect type of TOOL in Cats. Command ignored")
-
-        cmd = getattr(self.cats_device, cmd_name)
+        elif cmd_name == "soak":
+            if tool not in (TOOL_DOUBLE_GRIPPER, TOOL_UNIPUCK):
+                raise Exception("Can SOAK only with UNIPUCK or DOUBLE tool")
+            args = [str(tool), str(self.soak_lid)]
+        elif cmd_name == "back":
+            if tool is None:
+                raise Exception("Cannot detect TOOL type. back ignored.")
+            args = [tool, 0]
 
         try:
             if args is not None:
-                if len(args) > 1:
-                    ret = cmd(map(str, args))
-                else:
-                    ret = cmd(*args)
-            else:
-                ret = cmd()
-            return ret
+                if isinstance(args, (list, tuple)) and len(args) > 1:
+                    return cmd(list(map(str, args)))
+                if isinstance(args, (list, tuple)):
+                    return cmd(*args)
+                return cmd(args)
+            return cmd()
         except Exception as exc:
-            import traceback
             traceback.print_exc()
-            msg = exc[0].desc
-            raise Exception(msg)
-
+            raise Exception(str(exc))
