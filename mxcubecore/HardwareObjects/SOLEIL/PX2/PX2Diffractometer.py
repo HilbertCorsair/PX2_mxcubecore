@@ -443,12 +443,30 @@ class PX2Diffractometer(AbstractDiffractometer):
         return self.pixels_per_mm_x, self.pixels_per_mm_y
 
     def update_pixels_per_mm(self, *args):
-        if self.chan_calib_x and self.chan_calib_y:
-            self.pixels_per_mm_x = 1.0 / self.chan_calib_x.get_value()
-            self.pixels_per_mm_y = 1.0 / self.chan_calib_y.get_value()
-            self.emit(
-                "pixelsPerMmChanged", ((self.pixels_per_mm_x, self.pixels_per_mm_y),)
+        if not (self.chan_calib_x and self.chan_calib_y):
+            return
+        try:
+            calib_x = self.chan_calib_x.get_value()
+            calib_y = self.chan_calib_y.get_value()
+        except Exception as exc:
+            logging.getLogger("HWR").warning(
+                "PX2Diffractometer: pixels_per_mm read failed (%s); keeping previous values",
+                exc,
             )
+            return
+        if not calib_x or not calib_y:
+            logging.getLogger("HWR").warning(
+                "PX2Diffractometer: pixels_per_mm calibration is zero/None "
+                "(x=%r, y=%r); keeping previous values",
+                calib_x,
+                calib_y,
+            )
+            return
+        self.pixels_per_mm_x = 1.0 / calib_x
+        self.pixels_per_mm_y = 1.0 / calib_y
+        self.emit(
+            "pixelsPerMmChanged", ((self.pixels_per_mm_x, self.pixels_per_mm_y),)
+        )
 
     def wait_status_ready(self, timeout=None):
         """Block until the MD2 application reports the global state Ready."""

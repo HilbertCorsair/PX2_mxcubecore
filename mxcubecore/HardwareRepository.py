@@ -247,6 +247,9 @@ def load_from_yaml(
         except Exception:
             if _container:
                 msg0 = "Error in %s.init()" % cls.__name__
+                print(
+                    "Encountered Exception (continuing):\n%s" % traceback.format_exc()
+                )
             else:
                 # at top level we want to get the actual error
                 raise
