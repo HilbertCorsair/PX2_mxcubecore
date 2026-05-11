@@ -27,6 +27,9 @@ if sys.version_info > (3, 0):
     suds_encode = bytes.decode
 
 
+_CONNECTION_ERROR_MSG = "ISPyB connection error: webservice unreachable"
+
+
 def utf_encode(res_d):
     for key, value in res_d.items():
         if isinstance(value, dict):

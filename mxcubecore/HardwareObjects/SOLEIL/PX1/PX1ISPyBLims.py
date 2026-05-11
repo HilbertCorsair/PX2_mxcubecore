@@ -15,9 +15,15 @@ import logging
 from urllib.error import URLError
 from pprint import pformat
 from mxcubecore import HardwareRepository as HWR
-from mxcubecore.HardwareObjects.abstract.ISPyBDataAdapter import ISPyBDataAdapter
+from mxcubecore.HardwareObjects.abstract.ISPyBDataAdapter import (
+    ISPyBDataAdapter,
+    _CONNECTION_ERROR_MSG,
+)
 from mxcubecore.HardwareObjects.ProposalTypeISPyBLims import ProposalTypeISPyBLims
-from mxcubecore.model.lims_session import LimsSessionManager
+from mxcubecore.model.lims_session import (
+    Lims,
+    LimsSessionManager,
+)
 from mxcubecore.model.lims_session import Session as lims_Session
 
 log = logging.getLogger("ispyb_client")
@@ -74,15 +80,11 @@ def _create_session_object(proposal, session_id: str, beamline_name: str) -> lim
 
 
 class CustomISPyBDataAdapter(ISPyBDataAdapter):
-    def __init__(self, ws_root, ws_username, ws_password, beamline_name):
-        super().__init__(ws_root, ws_username, ws_password, beamline_name)
-        self.beamline_name = beamline_name
-        self.site = None
+    """SOLEIL/PX1 extensions to the standard ISPyB SOAP adapter."""
 
-    """
-    Extend the standard ISPyB data adapter with MAXIV specific logic of how to
-    deal with proposal sessions.
-    """
+    def __init__(self, ws_root, proxy, ws_username, ws_password, beamline_name):
+        super().__init__(ws_root, proxy, ws_username, ws_password, beamline_name)
+
     def trace(fun):
         def _trace(*args):
             log_msg = "lims client " + fun.__name__ + " called with: "
@@ -698,64 +700,54 @@ class PX1ISPyBLims(ProposalTypeISPyBLims):
     def __init__(self, name):
         super().__init__(name)
         self.login_type = "Proposal"
-        self.adapter = None
-        self.user_name = None
-        self.session_manager = None
-        self.samples_info_list = []
-        # Added to satisfy yaml loadind
+        # Pre-declared so YAML 'objects:' role lookups do not emit UserWarning
+        # (HardwareRepository role/attr convention).
         self.session = None
         self.ldapServer = None
 
     def init(self):
-        self.beamline_name = "PROXIMA1"#self.get_property("beamline_name")
+        super().init()
         self.site = self.get_property("site")
-        self.adapter = self._create_data_adapter()
-        self.ldapConnection = self.get_object_by_role("ldapServer")
 
     def _create_data_adapter(self) -> ISPyBDataAdapter:
-        data_adapter  = CustomISPyBDataAdapter(self.ws_root.strip(),
-                                               self.ws_username,
-                                               self.ws_password,
-                                               self.beamline_name,)
-        if not data_adapter._shipping :
-            data_adapter.initialize_services()
-        return data_adapter
+        return CustomISPyBDataAdapter(
+            self.ws_root.strip(),
+            self.proxy,
+            self.ws_username,
+            self.ws_password,
+            self.beamline_name,
+        )
 
     def store_data_collection(self, mx_collection, bl_config=None):
         return self.adapter.store_data_collection(mx_collection, bl_config)
 
-    def get_samples(self): #, lims_name):
-
-        response_samples = None
+    def get_samples(self, lims_name=None):
+        # lims_name accepted for parent API compatibility; PX1 keys off the active proposal.
         proposal_id = self.session_manager.active_session.proposal_id
-        # at this point the proposal id is 4
-        # Zeep SOAP request fails with pointer erro
-        # also happens for prpoposal id 20100023
 
-        if self.adapter._tools_ws:
-            try:
-                    response_samples = self.adapter._tools_ws.service.\
-                    findSampleInfoLightForProposal(proposal_id,
-                                                   self.beamline_name)
+        if not self.adapter._tools_ws:
+            logging.getLogger("ispyb_client").error(
+                "get_samples: ISPyB tools_ws not connected"
+            )
+            return []
 
+        try:
+            response_samples = self.adapter._tools_ws.service.findSampleInfoLightForProposal(
+                proposal_id, self.beamline_name
+            )
+        except Fault as e:
+            logging.getLogger("ispyb_client").exception(str(e))
+            return []
+        except URLError:
+            logging.getLogger("ispyb_client").exception(_CONNECTION_ERROR_MSG)
+            return []
 
-            except Fault as e:
-                response_samples = []
-                logging.getLogger("ispyb_client").exception(str(e))
-                return []
-            except URLError:
-                return []
-                logging.getLogger("ispyb_client").exception(_CONNECTION_ERROR_MSG)
-        else:
-            logging.getLogger("ispyb_client").\
-                exception("Error in get_samples: could not connect to server")
+        if not response_samples:
+            return []
 
-        # Raw data from ISPyB contains bytes objects : needs preprocessing
-        if response_samples :
-            response_samples = [self.adapter.convert_to_dict(z_obj)for z_obj in response_samples]
-            response_samples = [self.repare_bytes_dict(d) for d in response_samples]
-
-        return response_samples
+        # Raw data from ISPyB contains bytes objects: needs preprocessing.
+        response_samples = [self.adapter.convert_to_dict(z) for z in response_samples]
+        return [self.repare_bytes_dict(d) for d in response_samples]
 
     def repare_bytes_dict (self, dct):
 
@@ -788,53 +780,57 @@ class PX1ISPyBLims(ProposalTypeISPyBLims):
             s = b_obj
         return s
 
-    def login(self, pid):
-        self.user_name = pid
-        #self.data_adapter = self._create_data_adapter()
-        proposal = self.adapter.get_proposal(pid)
+    def login(self, login_id, password, is_local_host=False) -> LimsSessionManager:
+        # SOLEIL ISPyB authenticates by proposal_id alone; password / is_local_host
+        # are accepted only for parent / mxcubeweb usermanager API compatibility.
+        self.user_name = login_id
+        proposal = self.adapter.get_proposal(login_id)
         todays_session = self.adapter.get_todays_session(proposal)
-        start_datetime_str = self.check_to_string(todays_session["session"]['startDate'])
-        # Parse the string into a datetime object
-        start_dt_object = datetime.strptime(start_datetime_str, '%Y-%m-%d %H:%M:%S')
-        start_date_str = start_dt_object.strftime("%Y%m%d")
-        start_time_str = start_dt_object.strftime("%H:%M:%S")
-        end_datetime_str = self.check_to_string(todays_session["session"]['endDate'])
-        end_dt_object = datetime.strptime(end_datetime_str, '%Y-%m-%d %H:%M:%S')
-        end_date_str = end_dt_object.strftime("%Y%m%d")
-        end_time_str = end_dt_object.strftime("%H:%M:%S")
-        lims_session_object = lims_Session()
-        lims_session_object.start_date = start_date_str
-        lims_session_object.start_time = start_time_str
-        lims_session_object.end_date = end_date_str
-        lims_session_object.end_time = end_time_str
-        lims_session_object.session_id = todays_session["session"]['sessionId']
-        lims_session_object.beamline_name = self.beamline_name
-        lims_session_object.proposal_id = todays_session["session"]["proposalId"]
-        lims_session_object.proposal_name = f"mx{pid}"
-        lims_session_object.title = self.check_to_string(todays_session["session"]["proposalTitle"])
-        lims_session_object.code = self.check_to_string(todays_session["session"]["proposalCode"])
-        lims_session_object.number = self.check_to_string(todays_session["session"]["proposalNumber"])
-        lims_session_object.actual_start_date = ""
-        lims_session_object.actual_start_time = ""
-        lims_session_object.actual_end_date = ""
-        lims_session_object.actual_end_time = ""
-        lims_session_object.start_datetime = datetime.now()
-        lims_session_object.end_datetime = datetime.now() + timedelta(days=1)
-        lims_session_object.nb_shifts = "3"
-        lims_session_object.scheduled  = "3"
-        # status of the session depending on wether it has been rescheduled or moved
-        lims_session_object.is_rescheduled = False
-        lims_session_object.is_scheduled_time = True
-        lims_session_object.is_scheduled_beamline = True
+        self.session_manager = self._build_session_manager(
+            login_id, todays_session["session"]
+        )
+        return self.session_manager
 
-        LSM = LimsSessionManager()
-        LSM.active_session = lims_session_object
-        self.session_manager = LSM
-        return LSM #session #return super().login(loginID, psd)
+    def _build_session_manager(self, login_id, ispyb_session) -> LimsSessionManager:
+        to_str = self.check_to_string
+        start_dt = datetime.strptime(
+            to_str(ispyb_session["startDate"]), "%Y-%m-%d %H:%M:%S"
+        )
+        end_dt = datetime.strptime(
+            to_str(ispyb_session["endDate"]), "%Y-%m-%d %H:%M:%S"
+        )
 
+        session = lims_Session(
+            session_id=ispyb_session["sessionId"],
+            beamline_name=self.beamline_name,
+            proposal_id=ispyb_session["proposalId"],
+            proposal_name=f"mx{login_id}",
+            title=to_str(ispyb_session["proposalTitle"]),
+            code=to_str(ispyb_session["proposalCode"]),
+            number=to_str(ispyb_session["proposalNumber"]),
+            start_date=start_dt.strftime("%Y%m%d"),
+            start_time=start_dt.strftime("%H:%M:%S"),
+            end_date=end_dt.strftime("%Y%m%d"),
+            end_time=end_dt.strftime("%H:%M:%S"),
+            start_datetime=datetime.now(),
+            end_datetime=datetime.now() + timedelta(days=1),
+            nb_shifts="3",
+            scheduled="3",
+            is_rescheduled=False,
+            is_scheduled_time=True,
+            is_scheduled_beamline=True,
+        )
+        manager = LimsSessionManager()
+        manager.active_session = session
+        return manager
 
-    def get_lims_name(self):
-        return ["ISPyB"]
+    def get_lims_name(self) -> List[Lims]:
+        return [
+            Lims(
+                name="ISPyB",
+                description="Information System for protein Crystallographic Beamlines",
+            )
+        ]
 
     def set_active_session_by_id(self, session_id: str) -> lims_Session:
 
@@ -884,20 +880,6 @@ class PX1ISPyBLims(ProposalTypeISPyBLims):
             )
 
         return session
-
-    def get_default_prefix(self, sample_data, generic_name=False):
-
-        if isinstance(sample_data, dict):
-            sample = qmo.Sample()
-            sample.code = sample_data.get("code", "")
-            sample.name = sample_data.get("sampleName", "")
-            sample.name = sample.name.replace(":", "-")
-            sample.location = sample_data.get("location", "").split(":")
-            sample.lims_id = sample_data.get("limsID", -1)
-            sample.crystals[0].protein_acronym = sample_data.get("proteinAcronym", "")
-        else:
-            sample = sample_data
-        return HWR.beamline.session.get_default_prefix(sample, generic_name)
 
     def path_to_ispyb(self, path):
         return HWR.beamline.session.path_to_ispyb( path )
