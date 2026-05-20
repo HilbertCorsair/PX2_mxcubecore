@@ -83,13 +83,14 @@ class TangoMachineInfo(AbstractMachineInfo):
         """
     
         for name in self._mach_info_keys:
+            """
             # Hack to avoid error when device is unavalable! If block should be removed!
             if name == "sampleTemp":
                 self.c += 1
                 print(f"Encountered sampleTemp {self.c}..... skipping !")
                 
                 continue
-                
+            """    
             try:
                 self._mach_info_dict.update({name: getattr(self, name).get_value()})
             except Exception as err:
