@@ -24,7 +24,20 @@ class SOLEILSession(Session.Session):
         )
         return path
 
-    def set_user_info(self, username, user_id, group_id, projuser=None):
+    def set_user_info(self, username, user_id=None, group_id=None, projuser=None):
+        # user_id/group_id are optional (match sister repo): the login caller passes
+        # only username (+ projuser). Derive uid/gid from LDAP if a server is wired.
+        if username and not user_id and not group_id and getattr(self, "ldap_ho", None):
+            try:
+                user_id, group_id = self.ldap_ho.get_uid_gid(projuser)
+            except Exception:
+                logging.getLogger("HWR").exception(
+                    "SOLEILSession.set_user_info: could not get uid/gid from LDAP"
+                )
+
+        user_id = user_id[0] if isinstance(user_id, list) else user_id
+        group_id = group_id[0] if isinstance(group_id, list) else group_id
+
         logging.debug(
             "SESSION - User %s logged in. gid=%s / uid=%s "
             % (username, group_id, user_id)
