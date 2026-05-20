@@ -82,8 +82,8 @@ def _create_session_object(proposal, session_id: str, beamline_name: str) -> lim
 class CustomISPyBDataAdapter(ISPyBDataAdapter):
     """SOLEIL/PX1 extensions to the standard ISPyB SOAP adapter."""
 
-    def __init__(self, ws_root, proxy, ws_username, ws_password, beamline_name):
-        super().__init__(ws_root, proxy, ws_username, ws_password, beamline_name)
+    def __init__(self, ws_root, ws_username, ws_password, beamline_name, proxy=None):
+        super().__init__(ws_root, ws_username, ws_password, beamline_name, proxy)
 
     def trace(fun):
         def _trace(*args):
@@ -377,8 +377,9 @@ class CustomISPyBDataAdapter(ISPyBDataAdapter):
                 start_time=time.mktime(start_struct)
                 end_time=time.mktime(end_struct)
                 current_time=time.time()
-                # Check beamline name
-                if beamline==self.beamline_name:
+                # Check beamline name (case-insensitive: beamline_name now comes
+                # from HWR.beamline.session config and may differ in case from ISPyB)
+                if beamline.upper()==self.beamline_name.upper():
 
                     # Check date
                     if current_time>=start_time and current_time<=end_time:
@@ -710,13 +711,27 @@ class PX1ISPyBLims(ProposalTypeISPyBLims):
         self.site = self.get_property("site")
 
     def _create_data_adapter(self) -> ISPyBDataAdapter:
-        return CustomISPyBDataAdapter(
+        # SOLEIL: ISPyB web-service calls must go through the beamline proxy.
+        # zeep/requests need a scheme, so prefix http:// if the config gives bare host:port.
+        proxy_addr = self.get_property("proxy")
+        if proxy_addr:
+            if "://" not in proxy_addr:
+                proxy_addr = "http://" + proxy_addr
+            proxies = {"http": proxy_addr, "https": proxy_addr}
+        else:
+            # fall back to proxy built by super().init() from the proxy_address property
+            proxies = self.proxy or {}
+
+        adapter = CustomISPyBDataAdapter(
             self.ws_root.strip(),
-            self.proxy,
             self.ws_username,
             self.ws_password,
             self.beamline_name,
+            proxies,
         )
+        if not adapter._shipping:
+            adapter.initialize_services()
+        return adapter
 
     def store_data_collection(self, mx_collection, bl_config=None):
         return self.adapter.store_data_collection(mx_collection, bl_config)
