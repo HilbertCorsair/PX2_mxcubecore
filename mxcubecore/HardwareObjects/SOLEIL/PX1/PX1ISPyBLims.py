@@ -82,8 +82,8 @@ def _create_session_object(proposal, session_id: str, beamline_name: str) -> lim
 class CustomISPyBDataAdapter(ISPyBDataAdapter):
     """SOLEIL/PX1 extensions to the standard ISPyB SOAP adapter."""
 
-    def __init__(self, ws_root, ws_username, ws_password, beamline_name, proxy=None):
-        super().__init__(ws_root, ws_username, ws_password, beamline_name, proxy)
+    def __init__(self, ws_root, ws_username, ws_password, beamline_name):
+        super().__init__(ws_root, ws_username, ws_password, beamline_name)
 
     def trace(fun):
         def _trace(*args):
@@ -711,23 +711,14 @@ class PX1ISPyBLims(ProposalTypeISPyBLims):
         self.site = self.get_property("site")
 
     def _create_data_adapter(self) -> ISPyBDataAdapter:
-        # SOLEIL: ISPyB web-service calls must go through the beamline proxy.
-        # zeep/requests need a scheme, so prefix http:// if the config gives bare host:port.
-        proxy_addr = self.get_property("proxy")
-        if proxy_addr:
-            if "://" not in proxy_addr:
-                proxy_addr = "http://" + proxy_addr
-            proxies = {"http": proxy_addr, "https": proxy_addr}
-        else:
-            # fall back to proxy built by super().init() from the proxy_address property
-            proxies = self.proxy or {}
-
+        # SOLEIL: ISPyB is an internal host reached directly (NOT through the Squid
+        # proxy, which can't resolve internal *.synchrotron-soleil.fr names). Matches
+        # the sister repo ../mxcubecore_SOLEIL_PX1.
         adapter = CustomISPyBDataAdapter(
             self.ws_root.strip(),
             self.ws_username,
             self.ws_password,
             self.beamline_name,
-            proxies,
         )
         if not adapter._shipping:
             adapter.initialize_services()
@@ -795,9 +786,10 @@ class PX1ISPyBLims(ProposalTypeISPyBLims):
             s = b_obj
         return s
 
-    def login(self, login_id, password, is_local_host=False) -> LimsSessionManager:
+    def login(self, login_id, password=None, is_local_host=False) -> LimsSessionManager:
         # SOLEIL ISPyB authenticates by proposal_id alone; password / is_local_host
-        # are accepted only for parent / mxcubeweb usermanager API compatibility.
+        # are optional and accepted only for API compatibility. The simpler SOLEIL
+        # frontend calls lims.login(login_id) with no password.
         self.user_name = login_id
         proposal = self.adapter.get_proposal(login_id)
         todays_session = self.adapter.get_todays_session(proposal)

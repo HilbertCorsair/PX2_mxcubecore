@@ -95,14 +95,11 @@ class ISPyBDataAdapter():
         ws_username: str,
         ws_password: str,
         beamline_name: str,
-        proxy: dict = None,
     ):
        self.ws_root =  ws_root
        self.ws_username = ws_username
        self.ws_password = ws_password
        self.beamline_name = beamline_name
-       # SOLEIL: all ISPyB web-service calls must go through this proxy
-       self.proxy = proxy or {}
        self._shipping = None
        self._collection = None
        self._tools_ws = None
@@ -129,9 +126,6 @@ class ISPyBDataAdapter():
         from requests import Session
         session = Session()
         session.auth = HTTPBasicAuth(self.ws_username, self.ws_password)
-        # Route WSDL fetch + all WS calls through the configured proxy (SOLEIL)
-        if self.proxy:
-            session.proxies = self.proxy
 
         # Configure transport with timeout and session
         transport = Transport(session=session, timeout=5)

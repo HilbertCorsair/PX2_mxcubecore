@@ -87,7 +87,6 @@ class ISPyBAbstractLIMS(AbstractLims):
     def _create_data_adapter(self) -> ISPyBDataAdapter:
         return ISPyBDataAdapter(
             self.ws_root.strip(),
-            self.proxy,
             self.ws_username,
             self.ws_password,
             self.beamline_name,
