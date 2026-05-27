@@ -32,14 +32,15 @@ class SOLEILLdapLogin(HardwareObject):
         self.dc_parts = None
 
     def init(self):
+        # Deferred-connection: read config only. The actual LDAP bind is opened on
+        # first use (login / get_info / search_user / reconnect), so app startup
+        # does not require LDAP reachability.
         self.ldap_host = self.get_property('ldaphost')
         self.ldap_port = self.get_property('ldapport')
         self.process_host = self.get_property('process_host')
 
         if self.ldap_host is None:
             log.error("SOLEILLdapLogin: you must specify the LDAP hostname")
-        else:
-            self.open_connection()
 
         ldap_dc = self.get_property('ldapdc')
         if ldap_dc is not None:
@@ -119,12 +120,16 @@ class SOLEILLdapLogin(HardwareObject):
             self.ldap_connection = None
 
     def reconnect(self):
-        if self.ldap_connection is not None:
-            try:
-                # Better way to check connection status
-                self.ldap_connection.whoami_s()
-            except (ldap.LDAPError, Exception):
+        # Also opens on first use (deferred-connection): if no connection has been
+        # established yet, open one. If one exists, probe it and re-open on failure.
+        if self.ldap_connection is None:
+            if self.ldap_host is not None:
                 self.open_connection()
+            return
+        try:
+            self.ldap_connection.whoami_s()
+        except (ldap.LDAPError, Exception):
+            self.open_connection()
 
     def cleanup(self, ex: Optional[Exception] = None, msg: Optional[str] = None) -> Tuple[bool, Optional[str]]:
         if ex is not None:
@@ -162,6 +167,8 @@ class SOLEILLdapLogin(HardwareObject):
         if username.isdigit() and len(username) > 8:
             username = username[:8]
 
+        # Deferred-connection: try to bind anonymously on first call.
+        self.reconnect()
         if self.ldap_connection is None:
             return self.cleanup(msg="no LDAP server configured")
 
@@ -222,6 +229,7 @@ class SOLEILLdapLogin(HardwareObject):
             return found
 
     def find_groups_for_username(self,username):
+        self.reconnect()
         #dcparts = "dc=Exp"
         dcparts = "ou=Projets,ou=Groups,dc=EXP"
         filter = "(&(objectClass=posixGroup)(memberUid=%s))" % username
@@ -255,6 +263,7 @@ class SOLEILLdapLogin(HardwareObject):
         filter = "((memberUid=*))" % username
 
     def find_description_for_user(self,username):
+        self.reconnect()
         dcparts = "dc=EXP"
         filter = "uid=%s" % username
         found=self.ldap_connection.search_s(dcparts, ldap.SCOPE_SUBTREE, filter)
@@ -302,6 +311,7 @@ class SOLEILLdapLogin(HardwareObject):
         return retlist
 
     def show_all(self):
+        self.reconnect()
         try:
             found=self.ldap_connection.search_s(self.dcparts, ldap.SCOPE_SUBTREE)
         except ldap.LDAPError as err:

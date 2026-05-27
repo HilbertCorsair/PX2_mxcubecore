@@ -701,16 +701,54 @@ class PX1ISPyBLims(ProposalTypeISPyBLims):
     def __init__(self, name):
         super().__init__(name)
         self.login_type = "Proposal"
-        # Pre-declared so YAML 'objects:' role lookups do not emit UserWarning
-        # (HardwareRepository role/attr convention).
-        self.session = None
-        self.ldapServer = None
+        # Deferred SOAP adapter (see the `adapter` property below).
+        self._adapter = None
 
     def init(self):
-        super().init()
-        self.site = self.get_property("site")
+        # PX1 owns its own init: ISPyB is just SOAP plumbing here, with no LDAP
+        # role or Session child. LDAP lives under the beamline-level Session
+        # (HWR.beamline.session.ldap_ho). We reimplement what
+        # ISPyBAbstractLims.init() would do, minus the auth-coupling block.
+        self.beamline_name = HWR.beamline.session.beamline_name
+        self.samples = []
+        self._translations = {}
 
-    def _create_data_adapter(self) -> ISPyBDataAdapter:
+        self.authServerType = self.get_property("authServerType") or "ldap"
+        self.loginTranslate = self.get_property("loginTranslate", default_value=True)
+        self.ws_root = self.get_property("ws_root")
+        self.ws_username = self.get_property("ws_username") or None
+        pwd = self.get_property("ws_password")
+        self.ws_password = str(pwd) if pwd else None
+        self.base_result_url = self.get_property("base_result_url")
+        self.site = self.get_property("site")
+        # SOLEIL: ISPyB is reached directly (no Squid proxy — see _build_data_adapter).
+        self.proxy = {}
+        # Lazy adapter: self.adapter assignment goes through the setter and stays None
+        # until first access (login / get_samples / store_data_collection / ...).
+        self.adapter = self._create_data_adapter()
+
+    @property
+    def adapter(self) -> ISPyBDataAdapter:
+        # Deferred-connection: the SOAP adapter (and its zeep WSDL handshake) is
+        # built on first use rather than at app start, so users can launch MXCuBE
+        # without ISPyB being reachable.
+        if self._adapter is None:
+            self._adapter = self._build_data_adapter()
+        return self._adapter
+
+    @adapter.setter
+    def adapter(self, value):
+        # Accept assignment (including the None set by ISPyBAbstractLIMS.init()
+        # via `self.adapter = self._create_data_adapter()`) without losing laziness.
+        self._adapter = value
+
+    def _create_data_adapter(self):
+        # Override the parent's eager builder: returning None here keeps
+        # ISPyBAbstractLIMS.init() from triggering a SOAP connection at startup.
+        # The real adapter is built lazily in `_build_data_adapter()` on first use.
+        return None
+
+    def _build_data_adapter(self) -> ISPyBDataAdapter:
         # SOLEIL: ISPyB is an internal host reached directly (NOT through the Squid
         # proxy, which can't resolve internal *.synchrotron-soleil.fr names). Matches
         # the sister repo ../mxcubecore_SOLEIL_PX1.
