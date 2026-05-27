@@ -14,6 +14,28 @@ class SOLEILSession(Session.Session):
         self.gid = ""
         self.uid = ""
         self.projuser = ""
+        # YAML 'objects:' role placeholder (HardwareRepository role/attr convention)
+        # for the LDAP authenticator wired under this Session.
+        self.ldap_authenticator = None
+        # Resolved in init() — the SOLEILLdapLogin HO used by authenticate() /
+        # set_user_info(). May remain None when no LDAP role is wired (degrades
+        # to a non-LDAP auth path; see authenticate()).
+        self.ldap_ho = None
+
+    def init(self):
+        Session.Session.init(self)
+        self.ldap_ho = self.get_object_by_role("ldap_authenticator")
+
+    def authenticate(self, login_id, password):
+        """Validate user credentials against LDAP.
+
+        Returns:
+            (ok: bool, msg: str | None). When no LDAP HO is wired this returns
+            (True, None) — sites that do not run LDAP rely on ISPyB for auth.
+        """
+        if self.ldap_ho is None:
+            return True, None
+        return self.ldap_ho.login(login_id, password)
 
     def path_to_ispyb(self, path):
         ispyb_base = self["file_info"].get_property("ispyb_base_directory") % {
