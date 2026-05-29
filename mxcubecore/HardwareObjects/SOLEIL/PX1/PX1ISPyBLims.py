@@ -846,9 +846,9 @@ class PX1ISPyBLims(ProposalTypeISPyBLims):
         )
 
         session = lims_Session(
-            session_id=ispyb_session["sessionId"],
+            session_id = str( ispyb_session["sessionId"] ),
             beamline_name=self.beamline_name,
-            proposal_id=ispyb_session["proposalId"],
+            proposal_id = str( ispyb_session["proposalId"] ),
             proposal_name=f"mx{login_id}",
             title=to_str(ispyb_session["proposalTitle"]),
             code=to_str(ispyb_session["proposalCode"]),
@@ -867,6 +867,7 @@ class PX1ISPyBLims(ProposalTypeISPyBLims):
         )
         manager = LimsSessionManager()
         manager.active_session = session
+        manager.sessions = [session]
         return manager
 
     def get_lims_name(self) -> List[Lims]:
@@ -878,7 +879,6 @@ class PX1ISPyBLims(ProposalTypeISPyBLims):
         ]
 
     def set_active_session_by_id(self, session_id: str) -> lims_Session:
-
         """
         Sets session with session_id to active session
 

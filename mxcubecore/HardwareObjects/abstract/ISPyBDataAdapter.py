@@ -132,6 +132,7 @@ class ISPyBDataAdapter():
 
         try:
             client = Client(url, transport=transport)
+            client.service._binding_options['address'] = url.split("?")[0]
             return client
         except Exception as e:
             logging.getLogger("ispyb_client").exception(
