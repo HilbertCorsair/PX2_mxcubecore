@@ -74,9 +74,11 @@ class SOLEILTransmission(AbstractTransmission):
     def get_value(self):
         try:
             t = self.transmission.get_transmission()
-        except:
+        except Exception:
             t = None
-        return t
+        if t is None:
+            return float(self.get_property("default_value") or 0.0)
+        return float(t)
     
     def is_ready(self):
         return self.get_state() in [self.STATES.READY]

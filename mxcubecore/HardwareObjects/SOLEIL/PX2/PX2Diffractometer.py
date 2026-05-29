@@ -58,6 +58,17 @@ __version__ = "3.0"
 __category__ = "General"
 
 
+class _CallableBool(int):
+    # Truthy/falsy like a bool AND callable like a method — lets the same
+    # attribute satisfy callers that use property syntax (`if x.in_plate_mode`)
+    # and legacy method syntax (`x.in_plate_mode()`).
+    def __call__(self):
+        return bool(self)
+
+    def __repr__(self):
+        return repr(bool(self))
+
+
 class MD2MotorProxy(AbstractMotor):
     """Lightweight in-process motor backed by the MD2 Exporter.
 
@@ -201,6 +212,14 @@ class PX2Diffractometer(AbstractDiffractometer):
         super().__init__(name)
         self._exporter = None
 
+        # Pre-declare motor and nstate role attributes so introspection
+        # from the UI / Beamline layer doesn't warn when init() bails
+        # out before the proxy loop (e.g. off-site, no Exporter).
+        for _role in self.MOTOR_ROLE_TO_MD2:
+            setattr(self, _role, None)
+        for _role in ("beamstop", "capillary"):
+            setattr(self, _role, None)
+
         self.zoom = None
         self.omega_reference_motor = None
         self.omega_reference_par = None
@@ -309,6 +328,12 @@ class PX2Diffractometer(AbstractDiffractometer):
         self.cmd_save_centring_positions = self.get_command_object(
             "saveCentringPositions"
         )
+
+        for _role in self.config.nstate_equipment or ():
+            _hobj = self.get_object_by_role(_role)
+            if _hobj is not None:
+                self.nstate_equipment_hwobj_dict[_role] = _hobj
+                setattr(self, _role, _hobj)
 
         self.zoom = self.nstate_equipment_hwobj_dict.get(
             "zoom"
@@ -475,6 +500,23 @@ class PX2Diffractometer(AbstractDiffractometer):
 
     def use_sample_changer(self):
         return not self.in_plate_mode
+
+    # ------------------------------------------------------------------
+    # Backwards-compat shims for callers using the GenericDiffractometer
+    # API names. AbstractDiffractometer renamed them to get_phase /
+    # get_chip_configuration / in_plate_mode-as-property.
+    # ------------------------------------------------------------------
+
+    @property
+    def in_plate_mode(self):
+        return _CallableBool(self.head_type == DiffractometerHead.PLATE)
+
+    def get_current_phase(self) -> str:
+        phase = self.get_phase()
+        return phase.name if phase else "Unknown"
+
+    def get_head_configuration(self):
+        return self.get_chip_configuration()
 
     def re_emit_values(self):
         if self.current_phase is not None:

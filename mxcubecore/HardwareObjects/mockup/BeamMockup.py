@@ -38,6 +38,8 @@ Example xml configuration:
 __copyright__ = """ Copyright © by MXCuBE Collaboration """
 __license__ = "LGPLv3+"
 
+import ast
+
 from mxcubecore.HardwareObjects.abstract.AbstractBeam import AbstractBeam, BeamShape
 
 
@@ -82,7 +84,10 @@ class BeamMockup(AbstractBeam):
 
         self._definer_type = self.get_property("definer_type", _definer_type)
 
-        self._beam_position_on_screen = self.get_property("beam_position") or [318, 238]
+        raw_position = self.get_property("beam_position")
+        if isinstance(raw_position, str):
+            raw_position = ast.literal_eval(raw_position)
+        self._beam_position_on_screen = tuple(raw_position) if raw_position else (318, 238)
 
         self._check_beam = self.get_property("check_beam") or False
 

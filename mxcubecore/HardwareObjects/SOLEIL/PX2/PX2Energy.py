@@ -48,6 +48,15 @@ class PX2Energy(AbstractEnergy):
     def get_current_energy(self):
         return self.energy_channel.value / kilo
 
+    def get_value(self):
+        try:
+            raw = self.energy_channel.value
+            if raw is None:
+                raise ValueError("energy channel returned None")
+            return float(raw) / kilo
+        except Exception:
+            return float(self.default_en or self.get_property("default_energy") or 0.0)
+
     def get_wavelegth_from_energy(self, energy):
         return (h * c) / (eV * angstrom * kilo) / energy
 
