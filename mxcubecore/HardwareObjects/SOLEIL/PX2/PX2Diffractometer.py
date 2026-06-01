@@ -217,7 +217,14 @@ class PX2Diffractometer(AbstractDiffractometer):
         # out before the proxy loop (e.g. off-site, no Exporter).
         for _role in self.MOTOR_ROLE_TO_MD2:
             setattr(self, _role, None)
-        for _role in ("beamstop", "capillary"):
+        for _role in (
+            "beamstop",
+            "capillary",
+            "backlight",
+            "frontlight",
+            "backlightswitch",
+            "frontlightswitch",
+        ):
             setattr(self, _role, None)
 
         self.zoom = None
@@ -333,6 +340,16 @@ class PX2Diffractometer(AbstractDiffractometer):
             _hobj = self.get_object_by_role(_role)
             if _hobj is not None:
                 self.nstate_equipment_hwobj_dict[_role] = _hobj
+                setattr(self, _role, _hobj)
+
+        for _role in (
+            "backlight",
+            "frontlight",
+            "backlightswitch",
+            "frontlightswitch",
+        ):
+            _hobj = self.get_object_by_role(_role)
+            if _hobj is not None:
                 setattr(self, _role, _hobj)
 
         self.zoom = self.nstate_equipment_hwobj_dict.get(
