@@ -33,6 +33,13 @@ class SOLEILSession(Session.Session):
             (ok: bool, msg: str | None). When no LDAP HO is wired this returns
             (True, None) — sites that do not run LDAP rely on ISPyB for auth.
         """
+        # NO_ISPYB dev bypass: accept any credentials without contacting LDAP so
+        # the UI can be developed while ISPyB/LDAP are unreachable (see PX1ISPyBLims).
+        if os.environ.get("NO_ISPYB"):
+            logging.getLogger("HWR").warning(
+                "NO_ISPYB set: skipping LDAP authentication for %s" % login_id
+            )
+            return True, None
         if self.ldap_ho is None:
             return True, None
         return self.ldap_ho.login(login_id, password)
@@ -49,7 +56,14 @@ class SOLEILSession(Session.Session):
     def set_user_info(self, username, user_id=None, group_id=None, projuser=None):
         # user_id/group_id are optional (match sister repo): the login caller passes
         # only username (+ projuser). Derive uid/gid from LDAP if a server is wired.
-        if username and not user_id and not group_id and getattr(self, "ldap_ho", None):
+        # NO_ISPYB dev bypass: skip the LDAP lookup (avoids a slow off-LAN timeout).
+        if (
+            username
+            and not user_id
+            and not group_id
+            and getattr(self, "ldap_ho", None)
+            and not os.environ.get("NO_ISPYB")
+        ):
             try:
                 user_id, group_id = self.ldap_ho.get_uid_gid(projuser)
             except Exception:

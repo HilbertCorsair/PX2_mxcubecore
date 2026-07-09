@@ -1,4 +1,5 @@
 import logging
+import os
 import re
 import math
 from typing import (
@@ -767,6 +768,9 @@ class PX1ISPyBLims(ProposalTypeISPyBLims):
 
     def get_samples(self, lims_name=None):
         # lims_name accepted for parent API compatibility; PX1 keys off the active proposal.
+        # NO_ISPYB dev bypass: no ISPyB samples available offline.
+        if os.environ.get("NO_ISPYB"):
+            return []
         proposal_id = self.session_manager.active_session.proposal_id
 
         if not self.adapter._tools_ws:
@@ -828,12 +832,38 @@ class PX1ISPyBLims(ProposalTypeISPyBLims):
         # SOLEIL ISPyB authenticates by proposal_id alone; password / is_local_host
         # are optional and accepted only for API compatibility. The simpler SOLEIL
         # frontend calls lims.login(login_id) with no password.
+        # NO_ISPYB dev bypass: return a synthetic session without touching the SOAP
+        # adapter, so the UI loads while ISPyB is unreachable.
+        if os.environ.get("NO_ISPYB"):
+            return self._offline_login(login_id)
         self.user_name = login_id
         proposal = self.adapter.get_proposal(login_id)
         todays_session = self.adapter.get_todays_session(proposal)
         self.session_manager = self._build_session_manager(
             login_id, todays_session["session"]
         )
+        return self.session_manager
+
+    def _offline_login(self, login_id) -> LimsSessionManager:
+        # NO_ISPYB dev bypass: build a synthetic session manager reusing
+        # _build_session_manager so field parity with the real login is guaranteed.
+        # self.adapter is never accessed, so no SOAP/zeep connection is attempted.
+        self.user_name = login_id
+        code, number = self._get_proposal_code_and_number_by_proposal_name(login_id)
+        now = datetime.now()
+        synthetic_session = {
+            "sessionId": "0",
+            "proposalId": "0",
+            "proposalTitle": f"OFFLINE session ({login_id})",
+            "proposalCode": code,
+            "proposalNumber": number,
+            "startDate": now.strftime("%Y-%m-%d %H:%M:%S"),
+            "endDate": (now + timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        logging.getLogger("HWR").warning(
+            "NO_ISPYB set: returning synthetic LIMS session for %s" % login_id
+        )
+        self.session_manager = self._build_session_manager(login_id, synthetic_session)
         return self.session_manager
 
     def _build_session_manager(self, login_id, ispyb_session) -> LimsSessionManager:
