@@ -50,7 +50,7 @@ from mxcubecore.HardwareObjects.abstract.AbstractDiffractometer import (
     DiffractometerHead,
     DiffractometerPhase,
 )
-from mxcubecore.HardwareObjects.abstract.AbstractMotor import AbstractMotor
+from mxcubecore.HardwareObjects.ExporterMotor import ExporterMotor
 from mxcubecore.TaskUtils import task
 
 __credits__ = ["SOLEIL"]
@@ -69,13 +69,20 @@ class _CallableBool(int):
         return repr(bool(self))
 
 
-class MD2MotorProxy(AbstractMotor):
-    """Lightweight in-process motor backed by the MD2 Exporter.
+class MD2MotorProxy(ExporterMotor):
+    """In-process MD2 axis backed by the diffractometer's shared Exporter.
 
     Built and ``init()``-d directly by ``PX2Diffractometer`` rather than
     loaded by the YAML loader, so the per-motor wrapper YAML files are no
     longer needed. All proxies share the diffractometer's single Exporter
     connection.
+
+    It subclasses the canonical ``ExporterMotor`` purely to inherit its
+    device-queried, hardened limit logic (``get_limits`` /
+    ``get_dynamic_limits`` / ``get_max_speed`` -- which map ``±inf`` to
+    ``±sys.float_info.max`` so the values stay valid JSON). Only the wiring
+    that differs -- a shared connection driven by ``register`` callbacks
+    instead of per-motor channel objects -- is overridden below.
     """
 
     EXPORTER_TO_HWSTATE = {
@@ -113,15 +120,16 @@ class MD2MotorProxy(AbstractMotor):
         self.update_state(self.get_state())
 
     def get_value(self):
+        # Mirrors ExporterMotor.get_value: a missing/absent MD2 axis reads back
+        # as NaN (or None). Never hand a NaN up the stack -- it serialises to a
+        # bare `NaN` token, which is invalid JSON and breaks parsing of the
+        # whole beamline payload in the browser. Fall back to the last good
+        # value; when the axis has never read (absent), that is None -> JSON
+        # null, which the init loop uses to skip exposing the axis.
         value = self._exporter.read_property(self._position_event)
-        # A missing/absent MD2 axis reads back as NaN. Never hand a NaN up the
-        # stack: it serialises to a bare `NaN` token, which is invalid JSON and
-        # breaks parsing of the whole beamline payload in the browser. Callers
-        # (the adapter) treat this as "unreadable" and substitute a safe value.
         if value is None or (isinstance(value, float) and isnan(value)):
-            raise ValueError(
-                f"MD2 motor {self.actuator_name} returned no readable position"
-            )
+            return self._nominal_value
+        self._nominal_value = value
         return value
 
     def _set_value(self, value):
@@ -146,30 +154,11 @@ class MD2MotorProxy(AbstractMotor):
     def stop(self):
         self.abort()
 
-    def get_limits(self):
-        try:
-            low, high = self._exporter.execute(
-                "getMotorLimits", (self.actuator_name,)
-            )
-            low, high = float(low), float(high)
-        except Exception:
-            return self._nominal_limits
-        # Absent axes report NaN limits; keep them out of the JSON payload.
-        if isnan(low) or isnan(high):
-            return self._nominal_limits
-        return low, high
-
-    def get_dynamic_limits(self):
-        try:
-            low, high = self._exporter.execute(
-                "getMotorDynamicLimits", (self.actuator_name,)
-            )
-            return float(low), float(high)
-        except Exception:
-            return (-1e4, 1e4)
-
-    def get_max_speed(self):
-        return self._exporter.execute("getMotorMaxSpeed", (self.actuator_name,))
+    # get_limits / get_dynamic_limits / get_max_speed are inherited from
+    # ExporterMotor: they query getMotorLimits / getMotorDynamicLimits /
+    # getMotorMaxSpeed on the shared Exporter and map ±inf to ±float_max so
+    # the limits serialise to valid JSON (a bare `Infinity` token was what
+    # aborted the browser's JSON.parse of the login payload).
 
     def home(self, timeout=None):
         self._exporter.execute("startHomingMotor", (self.actuator_name,))
@@ -299,11 +288,14 @@ class PX2Diffractometer(AbstractDiffractometer):
 
             # Skip axes that aren't present on this MD2 head (e.g. kappa /
             # kappa_phi on a non-minikappa goniometer). Their Exporter position
-            # reads back as NaN, which get_value() now rejects; exposing such a
-            # proxy would leave a broken, unreadable motor in the UI, so drop it.
+            # reads back as NaN, which get_value() maps to None (no reading);
+            # exposing such a proxy would leave a broken, unreadable motor in
+            # the UI, so drop it.
             try:
-                proxy.get_value()
+                initial = proxy.get_value()
             except Exception:
+                initial = None
+            if initial is None:
                 self.log.warning(
                     "PX2Diffractometer: motor '%s' (%s) is not readable on this "
                     "head; not exposing it to the UI",
