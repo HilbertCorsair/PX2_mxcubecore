@@ -177,6 +177,108 @@ GetProcessesResponse {
 }
 ```
 
+## The video-streamer and Argussight
+
+It is easy to conflate the two, because Argussight was born as an extension of the
+video-streamer and both end up serving MPEG1. But they are **separate processes with
+separate jobs**, and understanding the split clarifies the whole system.
+
+### Two independent processes
+
+- **`video-streamer`** is a *single-camera encoder*. One process = one camera = one
+  output stream. It reads raw frames from a Redis source, encodes them, and serves the
+  result on one port. It knows nothing about Argussight and runs perfectly well on its
+  own — that is exactly the non-Argussight OAV path (`MXCUBE_STARTS_VIDEO_STREAM: true`,
+  the direct `VIDEO_STREAM_URL`), where MXCuBE shows one OAV stream and no switcher.
+- **`argussight`** is an *aggregator and control surface*. In external-stream mode it
+  produces no pixels of its own: it **registers** one-or-more already-running
+  video-streamers, re-exposes them all behind a single proxy port under stable names,
+  and answers a gRPC discovery call listing them.
+
+They are ordinary OS processes, can live on different hosts, and are started and
+stopped independently. Argussight is **optional**; the video-streamer is not.
+
+### How they complement each other
+
+Each solves one half of the problem:
+
+- the **video-streamer** answers *"turn one camera's frames into something a browser
+  can play"*;
+- **Argussight** answers *"present N such streams as one switchable, discoverable set
+  behind one port, each with a stable name"*.
+
+So Argussight sits **in front of** video-streamers — a multiplexer + name registry +
+discovery API — rather than replacing them. In the recommended (external-stream) setup
+the data still flows camera → Redis → `video-streamer` (MPEG1) → Argussight proxy →
+browser; Argussight adds the naming, the single front door, and the discovery call.
+
+### What using Argussight adds
+
+Without Argussight, MXCuBE can show exactly **one** OAV stream (the `RedisMpegVideo`
+object's direct URL). Turning Argussight on buys:
+
+- a **multi-camera switcher** in the sample view (OAV + the hutch cameras);
+- **one proxy port** (7000) in front of many streamer ports — simpler to firewall and
+  expose than N separate ports;
+- **runtime discovery** (`GetProcesses`): MXCuBE learns the camera list dynamically,
+  needing only matching *names* in `ARGUSSIGHT_CAMERAS`, not per-camera URLs/ports;
+- **stable names** decoupled from ports and stream hashes;
+- **graceful fallback**: if Argussight is down, MXCuBE drops back to the single direct
+  OAV stream and still works;
+- room for **frame processing**: internal `Streamer` subclasses can transform frames
+  before re-publishing (overlays, ROIs, recording), which a bare video-streamer cannot.
+
+### The output format also selects the transport (MPEG1 vs MJPEG)
+
+The `-of` flag does **more than pick a codec** — inside the video-streamer it selects a
+different FastAPI application, a different endpoint, and a different wire protocol
+(`available_applications = {"MPEG1": create_mpeg1_app, "MJPEG": create_mjpeg_app}`):
+
+| Aspect            | `-of MPEG1`                        | `-of MJPEG`                                 |
+|-------------------|------------------------------------|---------------------------------------------|
+| video-streamer app| `create_mpeg1_app`                 | `create_mjpeg_app`                          |
+| Endpoint          | `ws://host:port/ws/<hash>`         | `http://host:port/video/<hash>`             |
+| Wire protocol     | **WebSocket**                      | **HTTP `multipart/x-mixed-replace`**        |
+| Compression       | inter-frame (low bandwidth)        | full JPEG per frame (higher bandwidth)      |
+| Browser element   | `<canvas>` + **JSMpeg** decoder    | plain `<img src>` (native)                  |
+| Join latency      | waits for next sequence header     | instant (every frame is complete)           |
+
+The MXCuBE frontend chooses the branch from the format (`SampleImage.jsx`): for
+`MPEG1` it renders a `<canvas>` and opens a `JSMpeg.Player(wsSource)`; otherwise it
+renders `<img src={source}>` against the multipart endpoint. Same component, two paths.
+
+Two consequences worth internalising:
+
+- **Argussight's proxy is WebSocket/MPEG1.** It re-exposes streams at
+  `ws://host:7000/ws/<name>`, so the switcher path is inherently the MPEG1/JSMpeg one.
+  The MJPEG-over-HTTP path is what you get when you *bypass* the proxy — a browser
+  `<img>` pointed straight at a streamer (or at an MJPEG-capable camera such as the
+  Axis hutch cameras in the `ui.yaml` "Beamline Cameras" dropdown).
+- **MPEG1 trades a little join-latency for a lot of bandwidth.** Its only rough edge is
+  the mid-stream resync when you switch cameras (a client joining an MPEG1 stream must
+  wait for the next sequence header). If that stutter matters for a given camera, serve
+  *that* stream as `MJPEG` (its `-of` and the matching `format` in `server.yaml`).
+
+### PROXIMA-1 uses MJPEG — the same class, a different transport
+
+The sister beamline PROXIMA-1 (`mxcubecore_SOLEIL_PX1`) runs the **same
+`RedisMpegVideo` hardware object** and shells out to the **same `video-streamer`
+binary with the same arguments** — the only substantive change is `format: MJPEG`
+instead of `MPEG1`. Per the table above, that single value moves the whole video path
+off the WebSocket and onto HTTP multipart consumed by a plain `<img>`: no JSMpeg, no
+canvas, and (in PX1's deployment) no Argussight switcher — a single camera rendered
+directly. PX1 also couples its camera object more tightly to Tango (a `DeviceProxy`
+built in `init()`) and hard-codes an internal Redis host in its snapshot `poll_image`,
+whereas the PX2 object is pure-Redis and reads snapshots from the same configured
+`uri`/`redis_key` as the video.
+
+The practical upshot: **flipping PX2 to PX1's behaviour is a config change, not a code
+change.** Set `format: MJPEG` in both `md_camera.yaml` and `server.yaml`
+(`VIDEO_FORMAT`) and the frontend automatically switches from the canvas/WebSocket path
+to the `<img>`/HTTP path. You would do this to drop the JSMpeg dependency and get
+instant mid-stream joins, at the cost of higher bandwidth per stream and — since the
+Argussight proxy is WebSocket-based — outside the Argussight switcher.
+
 ## How MXCuBE integrates Argussight
 
 The integration lives entirely in the MXCuBE web layer (`mxcubeweb`); no changes

@@ -32,7 +32,7 @@ import os
 import time
 from ast import literal_eval
 from enum import Enum
-from math import sqrt
+from math import isnan, sqrt
 
 import beam_align
 import gevent
@@ -113,7 +113,16 @@ class MD2MotorProxy(AbstractMotor):
         self.update_state(self.get_state())
 
     def get_value(self):
-        return self._exporter.read_property(self._position_event)
+        value = self._exporter.read_property(self._position_event)
+        # A missing/absent MD2 axis reads back as NaN. Never hand a NaN up the
+        # stack: it serialises to a bare `NaN` token, which is invalid JSON and
+        # breaks parsing of the whole beamline payload in the browser. Callers
+        # (the adapter) treat this as "unreadable" and substitute a safe value.
+        if value is None or (isinstance(value, float) and isnan(value)):
+            raise ValueError(
+                f"MD2 motor {self.actuator_name} returned no readable position"
+            )
+        return value
 
     def _set_value(self, value):
         self.update_state(HardwareObjectState.BUSY)
@@ -142,9 +151,13 @@ class MD2MotorProxy(AbstractMotor):
             low, high = self._exporter.execute(
                 "getMotorLimits", (self.actuator_name,)
             )
-            return float(low), float(high)
+            low, high = float(low), float(high)
         except Exception:
             return self._nominal_limits
+        # Absent axes report NaN limits; keep them out of the JSON payload.
+        if isnan(low) or isnan(high):
+            return self._nominal_limits
+        return low, high
 
     def get_dynamic_limits(self):
         try:
@@ -283,6 +296,44 @@ class PX2Diffractometer(AbstractDiffractometer):
                 continue
             proxy = MD2MotorProxy(role, md2_name, self._exporter)
             proxy.init()
+
+            # Skip axes that aren't present on this MD2 head (e.g. kappa /
+            # kappa_phi on a non-minikappa goniometer). Their Exporter position
+            # reads back as NaN, which get_value() now rejects; exposing such a
+            # proxy would leave a broken, unreadable motor in the UI, so drop it.
+            try:
+                proxy.get_value()
+            except Exception:
+                self.log.warning(
+                    "PX2Diffractometer: motor '%s' (%s) is not readable on this "
+                    "head; not exposing it to the UI",
+                    role,
+                    md2_name,
+                )
+                setattr(self, role, None)
+                continue
+
+            # Expose the in-process proxy so mxcubeweb's AdapterManager can reach
+            # it (the UI reads motors from 'diffractometer.<role>' attributes):
+            #  - _hwobj_container + _name make proxy.id == "diffractometer.<role>"
+            #  - registering it in the repository under a leading-slash key makes
+            #    adapt_hardware_objects() enumerate it: that loop iterates the dict
+            #    keys and calls get_hardware_object(key), which prepends "/" and
+            #    does a plain dict lookup -- a non-slash key would miss and be
+            #    treated as a file to load, silently dropping the motor.
+            #
+            # NB: deliberately NOT added to self._hwobj_by_role. That dict is the
+            # diffractometer's role map, walked by get_object_by_role() (e.g. for
+            # "zoom"); leaking the minimal motor proxies into it breaks role
+            # resolution. proxy.id does not need it -- it is computed from the
+            # _hwobj_container chain -- and the adapter manager reads the global
+            # hardware_objects list, not this role map.
+            proxy._hwobj_container = self
+            proxy._name = role
+            HWR.get_hardware_repository().hardware_objects[
+                f"/diffractometer/{role}"
+            ] = proxy
+
             self.motors_hwobj_dict[role] = proxy
             setattr(self, role, proxy)
 
