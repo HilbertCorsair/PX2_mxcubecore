@@ -164,15 +164,18 @@ class TangoMotor(AbstractMotor):
             self.chan_velocity.set_value(value)
 
     def motstate_to_state(self, motstate):
-        motstate = str(motstate)
+        motstate = str(motstate).upper()
 
-        if motstate == "ON":
+        # ON/MOVING/FAULT/OFF come from DESY/P11 controllers; STANDBY/RUNNING/
+        # ALARM/DISABLE are the idle/motion/error tokens SOLEIL i11-ma motors
+        # report. Anything unrecognised stays UNKNOWN.
+        if motstate in ("ON", "STANDBY"):
             state = self.STATES.READY
-        elif motstate == "MOVING":
+        elif motstate in ("MOVING", "RUNNING"):
             state = self.STATES.BUSY
-        elif motstate == "FAULT":
+        elif motstate in ("FAULT", "ALARM"):
             state = self.STATES.FAULT
-        elif motstate == "OFF":
+        elif motstate in ("OFF", "DISABLE"):
             state = self.STATES.OFF
         else:
             state = self.STATES.UNKNOWN

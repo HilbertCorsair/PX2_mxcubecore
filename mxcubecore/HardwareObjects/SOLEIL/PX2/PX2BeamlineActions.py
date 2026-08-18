@@ -98,6 +98,10 @@ class PX2BeamlineActions(BeamlineActions):
                         pass
         except AttributeError:
             pass'''
+        # Container has no hardware state of its own; report READY when idle so
+        # the UI pill is not stuck at UNKNOWN. execute_command flips it to BUSY.
+        self.update_state(self.STATES.READY)
+
     def SimulatedAction(self):
         print("This is a simulated method")
 
@@ -111,6 +115,29 @@ class PX2BeamlineActions(BeamlineActions):
         """
         print(f"----------PX1BeamlineActions get commands self ctrl_list {self.ctrl_list} and hwobj_list {self.hwobj_list}")
         return self.ctrl_list + self.hwobj_list
+
+    def execute_command(self, name, args):
+        """Report BUSY while a procedure runs, READY when idle.
+
+        Annotated commands run in a greenlet and settle back to READY in
+        ``_command_done``; synchronous commands finish before this returns, so
+        we reset here (``_current_command`` still None). Errors leave FAULT.
+        """
+        self.update_state(self.STATES.BUSY)
+        try:
+            super().execute_command(name, args)
+        except Exception:
+            self.update_state(self.STATES.FAULT)
+            raise
+        else:
+            if self._current_command is None:
+                self.update_state(self.STATES.READY)
+
+    def _command_done(self, greenlet):
+        try:
+            super()._command_done(greenlet)
+        finally:
+            self.update_state(self.STATES.READY)
 
 
 

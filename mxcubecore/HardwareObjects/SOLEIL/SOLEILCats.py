@@ -24,6 +24,9 @@ from mxcubecore.HardwareObjects.Cats90 import (
     TOOL_UNIPUCK,
     UnipuckBasket,
 )
+from mxcubecore.HardwareObjects.abstract.AbstractSampleChanger import (
+    SampleChangerState,
+)
 from mxcubecore.TaskUtils import task
 
 
@@ -775,6 +778,30 @@ class SOLEILCats(Cats90):
     def _update_global_state(self, *args):
         state_dict, cmd_state, message = self.get_global_state()
         self.emit("globalStateChanged", (state_dict, cmd_state, message))
+        self._sync_base_state(state_dict["state"])
+
+    # Map of the computed global-state string to the AbstractSampleChanger enum.
+    _GLOBAL_STATE_TO_SC_STATE = {
+        "READY": SampleChangerState.Ready,
+        "MOVING": SampleChangerState.Moving,
+        "DISABLED": SampleChangerState.Disabled,
+        "OFFLINE": SampleChangerState.Fault,
+    }
+
+    def _sync_base_state(self, state_str):
+        """Mirror the computed global state onto the base state/status.
+
+        SOLEILCats routes the real state through ``globalStateChanged`` (the
+        maintenance panel) but never updated the AbstractSampleChanger
+        ``state``/``status`` fields, so the web adapter's SC state pill stayed
+        ``UNKNOWN`` (it reads ``get_status()`` and the ``stateChanged`` signal).
+        Keeping them in sync here lights up both paths; unrecognised strings
+        still fall back to ``Unknown``.
+        """
+        base_state = self._GLOBAL_STATE_TO_SC_STATE.get(
+            state_str, SampleChangerState.Unknown
+        )
+        self._set_state(base_state, state_str)
 
     def get_global_state(self):
         """Snapshot of state, command-availability flags, and message."""
