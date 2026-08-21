@@ -396,7 +396,7 @@ class SOLEILCats(Cats90):
             self.component_by_address[address] = component
             return component
 
-    def _init_sc_contents(self, separator="_"):
+    def _init_sc_contents(self):
         """Initialise sample-changer contents with default values."""
         start = time.time()
         logging.getLogger("HWR").info("SOLEILCats: initialising contents")
@@ -430,7 +430,7 @@ class SOLEILCats(Cats90):
             "SOLEILCats: contents initialised in %.3fs", time.time() - start
         )
 
-    def _do_update_cats_contents(self, separator="_"):
+    def _do_update_cats_contents(self):
         for basket_index in range(self.no_of_baskets):
             if self.do_detect_pucks:
                 channel = self.basket_channels[basket_index]
@@ -438,9 +438,9 @@ class SOLEILCats(Cats90):
             else:
                 is_present = True
             self.basket_presence[basket_index] = is_present
-        self._update_cats_contents(separator=separator)
+        self._update_cats_contents()
 
-    def _update_cats_contents(self, separator="_"):
+    def _update_cats_contents(self):
         start = time.time()
         logging.getLogger("HWR").info(
             "SOLEILCats: updating contents %s", self.basket_presence
@@ -455,7 +455,7 @@ class SOLEILCats(Cats90):
                 basket._set_info(is_present, datamatrix, False)
                 for sample_index in range(basket.get_number_of_samples()):
                     address = Pin.get_sample_address(
-                        basket_index + 1, sample_index + 1, separator=separator
+                        basket_index + 1, sample_index + 1
                     )
                     sample = self._get_by_address(address)
                     present = sample.get_container().is_present()
@@ -484,18 +484,24 @@ class SOLEILCats(Cats90):
                     "SOLEILCats: powerOn exception %s", traceback.format_exc()
                 )
 
-    def load(self, separator="_", sample=None, wait=True):
+    def load(self, sample=None, wait=True):
         self._update_state()
         logging.getLogger().info("SOLEILCats: load")
         self.assert_not_charging()
         self.check_power_on()
-        location = sample
-        logging.getLogger("HWR").info("SOLEILCats: load location %s", location)
 
-        if isinstance(location, str):
-            puck, sampleno = map(int, location.split(separator))
-        else:
-            puck, sampleno = location
+        # `sample` arrives as a container address string ("basket:sample",
+        # e.g. "1:01") from the web adapter / queue, or as a Pin component.
+        # Resolve it to the registered component and read its basket/vial —
+        # the same path the base Cats90.load uses (no custom separator).
+        component = self._resolve_component(sample)
+        if component is None:
+            raise Exception("SOLEILCats: no sample selected to load")
+        puck = component.get_basket_no()
+        sampleno = component.get_vial_no()
+        logging.getLogger("HWR").info(
+            "SOLEILCats: load component %s", component.get_address()
+        )
 
         lid, sample_in_lid = self.basketsample_to_lidsample(puck, sampleno)
         tool = self.tool_for_basket(puck)
@@ -505,10 +511,10 @@ class SOLEILCats(Cats90):
         # YAML — no external socket. (NOTE: argin layout confirmed against the
         # canonical Cats90._do_load; verify on the beamline against the DS.)
         argin = [
-            str(tool),
-            str(lid),
-            str(sample_in_lid),
-            str(stype),
+            str(int(tool)),
+            str(int(lid)),
+            str(int(sample_in_lid)),
+            str(int(stype)),
             "0",
             "0",
             "0",
@@ -535,11 +541,11 @@ class SOLEILCats(Cats90):
         loaded_basket, _ = self.lidsample_to_basketsample(loaded_lid, loaded_num)
         tool = self.tool_for_basket(loaded_basket)
         # CATS DS `get` argin: [tool, newmode, xshift, yshift, zshift].
-        argin = [str(tool), "0", "0", "0", "0"]
+        argin = [str(int(tool)), "0", "0", "0", "0"]
         logging.getLogger("HWR").info("SOLEILCats: unload argin=%s", argin)
         self._execute_server_task(self._cmdUnload, argin)
 
-    def _update_loaded_sample(self, sample_num=None, lid=None, separator="_"):
+    def _update_loaded_sample(self, sample_num=None, lid=None):
         start = time.time()
         if None in (sample_num, lid):
             loaded_num = self._chnNumLoadedSample.get_value()
@@ -553,7 +559,7 @@ class SOLEILCats(Cats90):
 
         if -1 not in (loaded_lid, loaded_num):
             basket, sample = self.lidsample_to_basketsample(loaded_lid, loaded_num)
-            address = "%d%s%02d" % (basket, separator, sample)
+            address = Pin.get_sample_address(basket, sample)
             new_sample = self._get_by_address(address)
         else:
             basket = sample = None
@@ -597,12 +603,14 @@ class SOLEILCats(Cats90):
             return False
         return diffractometer.is_sample_loaded()
 
-    def get_loaded_sample(self, separator="_", puck=None, sample=None):
+    def get_loaded_sample(self, puck=None, sample=None):
         if puck is None or sample is None:
             loaded_num = int(self._chnNumLoadedSample.get_value())
             loaded_lid = int(self._chnLidLoadedSample.get_value())
+            if -1 in (loaded_num, loaded_lid):
+                return None
             puck, sample = self.lidsample_to_basketsample(loaded_lid, loaded_num)
-        address = "%d%s%02d" % (puck, separator, sample)
+        address = Pin.get_sample_address(puck, sample)
         return self.get_component_by_address(address)
 
     def assert_not_charging(self):
