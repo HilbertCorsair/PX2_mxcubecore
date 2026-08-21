@@ -21,6 +21,10 @@ class Command(BaseModel):
 
     # name of the tango device command
     name: Optional[str] = None
+    # client-side call timeout in milliseconds (default is TangoCommand's 10000).
+    # Needed for slow commands (e.g. CATS poweron) that otherwise raise
+    # API_DeviceTimeout. Mirrors the channel `timeout` field.
+    timeout: Optional[int] = None
 
 
 class Channel(BaseModel):

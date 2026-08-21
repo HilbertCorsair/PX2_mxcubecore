@@ -541,6 +541,24 @@ class PX2Diffractometer(AbstractDiffractometer):
             self.current_status = self.chan_status.get_value()
         return self.current_status
 
+    def is_sample_loaded(self):
+        """Return whether a sample is currently mounted on the goniometer.
+
+        Reads the MD Exporter ``SampleIsLoaded`` boolean declared in the
+        diffractometer YAML. Used by the sample changer
+        (``SOLEILCats.has_loaded_sample``) so the changer does not need its own
+        connection to the goniometer.
+        """
+        chan = self.get_channel_object("SampleIsLoaded")
+        if chan is None:
+            self.log.warning(
+                "PX2Diffractometer: SampleIsLoaded channel not configured"
+            )
+            return False
+        # The Exporter returns booleans as the strings "true"/"false", so parse
+        # them the same way the rest of the codebase does (str().lower()).
+        return str(chan.get_value()).strip().lower() == "true"
+
     def use_sample_changer(self):
         return not self.in_plate_mode
 

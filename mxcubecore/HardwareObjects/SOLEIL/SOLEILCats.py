@@ -13,6 +13,7 @@ import traceback
 
 import gevent
 
+from mxcubecore import HardwareRepository as HWR
 from mxcubecore.HardwareObjects.Cats90 import (
     BASKET_SPINE,
     BASKET_UNIPUCK,
@@ -92,8 +93,6 @@ class SOLEILCats(Cats90):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.cats_api = None
-        self.goniometer = None
         self.component_by_address = {}
         self.basket_channels = []
         self.basket_presence = []
@@ -103,38 +102,7 @@ class SOLEILCats(Cats90):
         #   "OFFLINE" — last read/probe failed (PyCATS or Tango)
         self._connection_state = "UNKNOWN"
 
-    def _lazy_load_external(self):
-        """Import and instantiate the external SOLEIL ``cats`` and
-        ``goniometer`` helpers. Done in init() rather than at module
-        import time so the module can be imported off-network without
-        triggering Tango connections.
-        """
-        try:
-            from cats import cats as cats_factory
-        except ModuleNotFoundError:
-            from experimental_methods import cats as cats_factory
-        try:
-            from goniometer import goniometer as goniometer_factory
-        except ModuleNotFoundError:
-            from experimental_methods import goniometer as goniometer_factory
-        log = logging.getLogger("HWR")
-        try:
-            self.cats_api = cats_factory()
-        except Exception as exc:
-            self._set_connection_state(
-                "OFFLINE", "PyCATS connect failed: %s" % exc
-            )
-            log.exception("SOLEILCats: PyCATS connect failed")
-            raise
-        try:
-            self.goniometer = goniometer_factory()
-        except Exception as exc:
-            log.exception("SOLEILCats: goniometer wrapper init failed")
-            raise
-
     def init(self):
-        self._lazy_load_external()
-
         # Bookkeeping defaults
         self._selected_sample = None
         self._selected_basket = None
@@ -180,6 +148,15 @@ class SOLEILCats(Cats90):
         self._setup_channels_from_yaml()
         self._setup_commands_from_yaml()
         self._init_sc_contents()
+        # Populate the dewar contents once from the basket-presence Tango
+        # channels so the Content tree and get_sample_list() are not empty
+        # (get_contents_as_dict only emits *present* elements). Then push the
+        # computed state so the Equipment status pill shows the live value
+        # instead of a stuck UNKNOWN — the web adapter connects to
+        # `stateChanged` after init, and the base _set_state only emits on
+        # change.
+        self._do_update_cats_contents()
+        self._update_global_state()
 
         if self.get_property("read_datamatrix"):
             self.set_read_barcode(True)
@@ -406,12 +383,8 @@ class SOLEILCats(Cats90):
 
     def get_basket_list(self):
         basket_list = []
-        dewar_content = self.cats_api.get_dewar_content()
-        k = 0
         for basket in self.get_components():
             if isinstance(basket, Basket):
-                basket._name = dewar_content[k]
-                k += 1
                 basket_list.append(basket)
         return basket_list
 
@@ -504,7 +477,8 @@ class SOLEILCats(Cats90):
         if not self._chnPowered.get_value():
             logging.getLogger().info("SOLEILCats: powering on the arm")
             try:
-                self.cats_api.on()
+                self._cmdPowerOn()
+                gevent.sleep(2)
             except Exception:
                 logging.getLogger("HWR").info(
                     "SOLEILCats: powerOn exception %s", traceback.format_exc()
@@ -519,29 +493,51 @@ class SOLEILCats(Cats90):
         logging.getLogger("HWR").info("SOLEILCats: load location %s", location)
 
         if isinstance(location, str):
-            puck, sample = map(int, location.split(separator))
+            puck, sampleno = map(int, location.split(separator))
         else:
-            puck, sample = location
+            puck, sampleno = location
 
-        lid = (puck - 1) // self.no_of_lids + 1
-        sample_in_lid = (
-            ((puck - 1) % self.no_of_lids) * self.samples_per_basket + sample
-        )
+        lid, sample_in_lid = self.basketsample_to_lidsample(puck, sampleno)
+        tool = self.tool_for_basket(puck)
+        stype = self.get_cassette_type(puck)
+        # CATS DS `getput` argin: [tool, lid, sample, type, newmode,
+        # xshift, yshift, zshift]. Sent to the Tango command declared in the
+        # YAML — no external socket. (NOTE: argin layout confirmed against the
+        # canonical Cats90._do_load; verify on the beamline against the DS.)
+        argin = [
+            str(tool),
+            str(lid),
+            str(sample_in_lid),
+            str(stype),
+            "0",
+            "0",
+            "0",
+            "0",
+        ]
         logging.getLogger("HWR").info(
-            "SOLEILCats: load puck=%d sample=%d (lid=%d, sample_in_lid=%d)",
-            puck,
-            sample,
-            lid,
-            sample_in_lid,
+            "SOLEILCats: load puck=%d sample=%d argin=%s", puck, sampleno, argin
         )
-        self.cats_api.getput(lid, sample_in_lid, wait=True)
+        self._execute_server_task(self._cmdChainedLoad, argin)
         self._trigger_info_changed_event()
 
     def unload(self, sample_slot=None, wait=True):
         logging.getLogger().info("SOLEILCats: unload")
         self.assert_not_charging()
         self.check_power_on()
-        self.cats_api.get(wait=True)
+
+        loaded_lid = self._chnLidLoadedSample.get_value()
+        loaded_num = self._chnNumLoadedSample.get_value()
+        if loaded_lid in (None, -1):
+            logging.getLogger("HWR").warning(
+                "SOLEILCats: unload — no sample mounted (lid=%s)", loaded_lid
+            )
+            return
+        loaded_basket, _ = self.lidsample_to_basketsample(loaded_lid, loaded_num)
+        tool = self.tool_for_basket(loaded_basket)
+        # CATS DS `get` argin: [tool, newmode, xshift, yshift, zshift].
+        argin = [str(tool), "0", "0", "0", "0"]
+        logging.getLogger("HWR").info("SOLEILCats: unload argin=%s", argin)
+        self._execute_server_task(self._cmdUnload, argin)
 
     def _update_loaded_sample(self, sample_num=None, lid=None, separator="_"):
         start = time.time()
@@ -590,15 +586,22 @@ class SOLEILCats(Cats90):
         self._update_state()
 
     def has_loaded_sample(self):
-        return self.goniometer.sample_is_loaded()
+        # "Is a sample mounted on the goniometer?" is the diffractometer's
+        # knowledge — it owns the MD Exporter and its `SampleIsLoaded` channel.
+        # Delegating keeps the changer from opening a second px2em connection.
+        diffractometer = HWR.beamline.diffractometer
+        if diffractometer is None:
+            logging.getLogger("HWR").warning(
+                "SOLEILCats: diffractometer not available for sample detection"
+            )
+            return False
+        return diffractometer.is_sample_loaded()
 
     def get_loaded_sample(self, separator="_", puck=None, sample=None):
         if puck is None or sample is None:
             loaded_num = int(self._chnNumLoadedSample.get_value())
             loaded_lid = int(self._chnLidLoadedSample.get_value())
             puck, sample = self.lidsample_to_basketsample(loaded_lid, loaded_num)
-            if loaded_lid is None:
-                puck, sample = self.cats_api.get_mounted_puck_and_sample()
         address = "%d%s%02d" % (puck, separator, sample)
         return self.get_component_by_address(address)
 
@@ -779,6 +782,12 @@ class SOLEILCats(Cats90):
         state_dict, cmd_state, message = self.get_global_state()
         self.emit("globalStateChanged", (state_dict, cmd_state, message))
         self._sync_base_state(state_dict["state"])
+        # Re-emit the base state unconditionally (mirroring globalStateChanged).
+        # The web adapter connects to `stateChanged` after this object is
+        # initialised and the base `_set_state` only emits on change, so without
+        # this the Equipment status pill would stay stuck at the value read at
+        # page load instead of tracking the live state.
+        self.emit("stateChanged", (self.state, self.state))
 
     # Map of the computed global-state string to the AbstractSampleChanger enum.
     _GLOBAL_STATE_TO_SC_STATE = {
@@ -839,6 +848,10 @@ class SOLEILCats(Cats90):
             "regulon": (not self._regulating) and ready,
             "openlid1": (not self._lid1state) and self._powered and ready,
             "closelid1": self._lid1state and self._powered and ready,
+            "openlid2": (not self._lid2state) and self._powered and ready,
+            "closelid2": self._lid2state and self._powered and ready,
+            "openlid3": (not self._lid3state) and self._powered and ready,
+            "closelid3": self._lid3state and self._powered and ready,
             "dry": (not self._running) and self._powered and ready,
             "soak": (not self._running) and self._powered and ready,
             "home": (not self._running) and self._powered and ready,
@@ -881,10 +894,14 @@ class SOLEILCats(Cats90):
                 ],
             ],
             [
-                "Lid",
+                "Lids",
                 [
-                    ["openlid1", "Open Lid", "Open Lid"],
-                    ["closelid1", "Close Lid", "Close Lid"],
+                    ["openlid1", "Open Lid 1", "Open Lid 1"],
+                    ["closelid1", "Close Lid 1", "Close Lid 1"],
+                    ["openlid2", "Open Lid 2", "Open Lid 2"],
+                    ["closelid2", "Close Lid 2", "Close Lid 2"],
+                    ["openlid3", "Open Lid 3", "Open Lid 3"],
+                    ["closelid3", "Close Lid 3", "Close Lid 3"],
                 ],
             ],
             [

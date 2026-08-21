@@ -34,6 +34,8 @@ def _setup_tango_commands_channels(hwobj: HardwareObject, tango_config: dict):
         #
         for command_name, command_config in device_config.get_commands():
             attrs = {"type": "tango", "name": command_name, "tangoname": device_name}
+            if command_config.timeout:
+                attrs["timeout"] = command_config.timeout
             hwobj.add_command(attrs, command_config.name)
 
         #
