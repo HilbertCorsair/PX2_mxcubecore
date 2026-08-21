@@ -127,6 +127,8 @@ class SOLEILCats(Cats90):
         self._lid2state = None
         self._lid3state = None
         self._message = None
+        # Translated Tango DevState (see _translate_state); drives the pill.
+        self._sc_state = SampleChangerState.Unknown
 
         # Configuration
         self.tangoname = self.get_property("tangoname")
@@ -763,7 +765,40 @@ class SOLEILCats(Cats90):
     def _update_state(self, value=None, value2=None):
         logging.debug("SOLEILCats: _update_state %s %s", value, value2)
         self._state = value
+        self._sc_state = self._translate_state(value)
         self._update_global_state()
+
+    # Tango DevState name -> AbstractSampleChanger enum. Mirrors the merged
+    # SOLEILMicrodiffMotor `_motor_state_to_hwstate` pattern: a Tango `State`
+    # attribute read yields a PyTango.DevState whose str() is unreliable, so we
+    # key on `.name`. The DS State already encodes power-off (DISABLE/OFF), so
+    # the pill no longer depends on the separate `_powered` flag.
+    _DEVSTATE_TO_SC = {
+        "ON": SampleChangerState.Ready,
+        "STANDBY": SampleChangerState.Ready,
+        "RUNNING": SampleChangerState.Moving,
+        "MOVING": SampleChangerState.Moving,
+        "DISABLE": SampleChangerState.Disabled,
+        "OFF": SampleChangerState.Disabled,
+        "INIT": SampleChangerState.Disabled,
+        "ALARM": SampleChangerState.Alarm,
+        "FAULT": SampleChangerState.Fault,
+        "UNKNOWN": SampleChangerState.Unknown,
+    }
+
+    def _translate_state(self, raw):
+        """Translate a raw Tango ``State`` value to a ``SampleChangerState``.
+
+        Accepts a ``PyTango.DevState`` (uses ``.name``) or a plain string;
+        unrecognised values fall back to ``Unknown``.
+        """
+        if raw is None:
+            return SampleChangerState.Unknown
+        if hasattr(raw, "name"):
+            raw = raw.name
+        return self._DEVSTATE_TO_SC.get(
+            str(raw).upper(), SampleChangerState.Unknown
+        )
 
     def _update_lid1_state(self, value):
         self._update_lid_state(1, value)
@@ -803,6 +838,7 @@ class SOLEILCats(Cats90):
         "MOVING": SampleChangerState.Moving,
         "DISABLED": SampleChangerState.Disabled,
         "OFFLINE": SampleChangerState.Fault,
+        "UNKNOWN": SampleChangerState.Unknown,
     }
 
     def _sync_base_state(self, state_str):
@@ -823,18 +859,26 @@ class SOLEILCats(Cats90):
     def get_global_state(self):
         """Snapshot of state, command-availability flags, and message."""
         offline = self._connection_state == "OFFLINE"
-        ready = (not offline) and str(self._state) in ("READY", "ON")
+        # Operable state is derived from the translated Tango DevState, not from
+        # a raw str() compare nor the separate `_powered` flag (the DevState
+        # already reports DISABLE/OFF when unpowered).
+        ready = (not offline) and self._sc_state == SampleChangerState.Ready
 
         if offline:
             state_str = "OFFLINE"
-        elif self._running:
+        elif self._running or self._sc_state == SampleChangerState.Moving:
             state_str = "MOVING"
-        elif not self._powered and ready:
+        elif self._sc_state == SampleChangerState.Disabled:
             state_str = "DISABLED"
         elif ready:
             state_str = "READY"
+        elif self._sc_state in (
+            SampleChangerState.Alarm,
+            SampleChangerState.Fault,
+        ):
+            state_str = "OFFLINE"
         else:
-            state_str = str(self._state)
+            state_str = "UNKNOWN"
 
         state_dict = {
             "toolopen": self._toolopen,
