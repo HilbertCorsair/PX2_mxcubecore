@@ -894,9 +894,16 @@ class SOLEILCats(Cats90):
 
         # When offline, disable every action — calling them would raise
         # at the Tango layer anyway and confuse the UI further.
+        # Power control must work precisely when the SC is NOT ready: powered
+        # off, the Tango State reads DISABLE/OFF -> _sc_state == Disabled ->
+        # ready == False. Gating powerOn on `ready` would leave it permanently
+        # disabled. So gate power only on connection + the power flag. Explicit
+        # `is True/False` so a not-yet-read `_powered is None` disables both
+        # rather than falsely enabling powerOn.
+        online = not offline
         cmd_state = {
-            "powerOn": (not self._powered) and ready,
-            "powerOff": self._powered and ready,
+            "powerOn": online and (self._powered is False),
+            "powerOff": online and (self._powered is True),
             "regulon": (not self._regulating) and ready,
             "openlid1": (not self._lid1state) and self._powered and ready,
             "closelid1": self._lid1state and self._powered and ready,
