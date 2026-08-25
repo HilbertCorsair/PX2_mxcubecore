@@ -58,6 +58,26 @@ __version__ = "3.0"
 __category__ = "General"
 
 
+# Raw MD2 Exporter ``State`` string -> framework HardwareObjectState. Shared by
+# the diffractometer and its in-process motor proxies so both translate the same
+# way. Unrecognised values fall back to UNKNOWN.
+EXPORTER_TO_HWSTATE = {
+    "Ready": HardwareObjectState.READY,
+    "Standby": HardwareObjectState.READY,
+    "STANDBY": HardwareObjectState.READY,
+    "LowLim": HardwareObjectState.READY,
+    "HighLim": HardwareObjectState.READY,
+    "Moving": HardwareObjectState.BUSY,
+    "MOVING": HardwareObjectState.BUSY,
+    "Initializing": HardwareObjectState.BUSY,
+    "Created": HardwareObjectState.UNKNOWN,
+    "Unknown": HardwareObjectState.UNKNOWN,
+    "Invalid": HardwareObjectState.FAULT,
+    "Fault": HardwareObjectState.FAULT,
+    "Offline": HardwareObjectState.OFF,
+}
+
+
 class _CallableBool(int):
     # Truthy/falsy like a bool AND callable like a method — lets the same
     # attribute satisfy callers that use property syntax (`if x.in_plate_mode`)
@@ -85,21 +105,9 @@ class MD2MotorProxy(ExporterMotor):
     instead of per-motor channel objects -- is overridden below.
     """
 
-    EXPORTER_TO_HWSTATE = {
-        "Ready": HardwareObjectState.READY,
-        "Standby": HardwareObjectState.READY,
-        "STANDBY": HardwareObjectState.READY,
-        "LowLim": HardwareObjectState.READY,
-        "HighLim": HardwareObjectState.READY,
-        "Moving": HardwareObjectState.BUSY,
-        "MOVING": HardwareObjectState.BUSY,
-        "Initializing": HardwareObjectState.BUSY,
-        "Created": HardwareObjectState.UNKNOWN,
-        "Unknown": HardwareObjectState.UNKNOWN,
-        "Invalid": HardwareObjectState.FAULT,
-        "Fault": HardwareObjectState.FAULT,
-        "Offline": HardwareObjectState.OFF,
-    }
+    # Shared module-level translation table (see EXPORTER_TO_HWSTATE above);
+    # kept as a class alias so existing references keep working.
+    EXPORTER_TO_HWSTATE = EXPORTER_TO_HWSTATE
 
     def __init__(self, name, actuator_name, exporter):
         super().__init__(name)
@@ -424,6 +432,26 @@ class PX2Diffractometer(AbstractDiffractometer):
         if self.current_state != state:
             self.current_state = state
             self.emit("minidiffStateChanged", (self.current_state,))
+        # Drive the framework state as well: `update_state` sets/clears the
+        # ready event and emits `stateChanged`, which the web adapter consumes
+        # for the Equipment READY/BUSY pill. Without this the diffractometer
+        # stays stuck at its init state (UNKNOWN -> always BUSY).
+        self.update_state(
+            EXPORTER_TO_HWSTATE.get(state, HardwareObjectState.UNKNOWN)
+        )
+
+    def get_state(self):
+        """Return the live MD2 state translated to a HardwareObjectState.
+
+        Overrides the cached-``_state`` default so callers (and the init-time
+        ``update_state(self.get_state())``) reflect the current MD2 ``State``
+        channel instead of the value last written by ``update_state``.
+        """
+        if not self.chan_state:
+            return HardwareObjectState.UNKNOWN
+        return EXPORTER_TO_HWSTATE.get(
+            self.chan_state.get_value(), HardwareObjectState.UNKNOWN
+        )
 
     def status_changed(self, status):
         if self.current_status != status:

@@ -223,13 +223,21 @@ class SOLEILCats(Cats90):
             self._channel_slots[channel_name] = wrapped
             channel.connect_signal("update", wrapped)
 
-        # Per-sample channels (no auto-handler — read on demand)
+        # Loaded-sample channels: drive `_update_loaded_sample` so a load/unload
+        # completing on the arm auto-publishes `loadedSampleChanged` (the web
+        # adapter clears/sets the table highlight and dismisses the operation
+        # dialog). The handler is idempotent, so the explicit calls in
+        # load()/unload() stay harmless. Same strong-ref wrapping as the other
+        # channels — the dispatcher holds receivers weakly.
         for name in ("_chnNumLoadedSample", "_chnLidLoadedSample"):
             channel = self.get_channel_object(name, optional=True)
             if channel is None:
                 log.warning("SOLEILCats: channel %s missing from YAML", name)
                 continue
             setattr(self, name, channel)
+            wrapped = self._wrap_handler(name, self._update_loaded_sample)
+            self._channel_slots[name] = wrapped
+            channel.connect_signal("update", wrapped)
 
         # Basket-presence channels — collected, connected only if pucks
         # are being detected.
@@ -491,7 +499,10 @@ class SOLEILCats(Cats90):
                 self._cmdPowerOn()
                 gevent.sleep(2)
             except Exception:
-                logging.getLogger("HWR").info(
+                # Not fatal here (the caller proceeds and the CATS command that
+                # follows will fail loudly if the arm really is unpowered), but
+                # surface it at WARNING so it isn't lost in the INFO stream.
+                logging.getLogger("HWR").warning(
                     "SOLEILCats: powerOn exception %s", traceback.format_exc()
                 )
 
@@ -534,8 +545,13 @@ class SOLEILCats(Cats90):
         logging.getLogger("HWR").info(
             "SOLEILCats: load puck=%d sample=%d argin=%s", puck, sampleno, argin
         )
-        self._execute_server_task(self._cmdChainedLoad, argin)
-        self._trigger_info_changed_event()
+        result = self._execute_server_task(self._cmdChainedLoad, argin)
+        # Publish the new loaded sample. Idempotent — also fires from the
+        # loaded-sample channel update — but doing it here guarantees the change
+        # is out before we return. `_mount_sample` needs a truthy return to
+        # start autoloop centring and run its post-mount cleanup.
+        self._update_loaded_sample()
+        return result
 
     def unload(self, sample_slot=None, wait=True):
         logging.getLogger().info("SOLEILCats: unload")
@@ -555,47 +571,55 @@ class SOLEILCats(Cats90):
         argin = [str(int(tool)), "0", "0", "0", "0"]
         logging.getLogger("HWR").info("SOLEILCats: unload argin=%s", argin)
         self._execute_server_task(self._cmdUnload, argin)
+        # Publish the transition to "no sample" so the web adapter clears the
+        # loaded sample and dismisses the "Sample changer in operation" dialog.
+        # Idempotent and also fires from the loaded-sample channel update.
+        self._update_loaded_sample()
 
-    def _update_loaded_sample(self, sample_num=None, lid=None):
-        start = time.time()
-        if None in (sample_num, lid):
-            loaded_num = self._chnNumLoadedSample.get_value()
-            loaded_lid = self._chnLidLoadedSample.get_value()
-        else:
-            loaded_num = sample_num
-            loaded_lid = lid
+    def _update_loaded_sample(self, *args):
+        """Publish the currently mounted sample when it changes.
 
+        Called both from the loaded-sample channel updates and explicitly after
+        load/unload. ``get_loaded_sample`` is overridden here to read the CATS
+        channels directly, so a change can't be detected by re-reading it for
+        both sides of a comparison — instead we compare the freshly-read current
+        sample against the last *published* one (``self.former_loaded``). Emits
+        ``loadedSampleChanged`` / ``infoChanged`` only on a real transition, so
+        the channel-driven and explicit call paths are both idempotent.
+
+        Any positional args (the channel value passed by the dispatcher) are
+        ignored; the loaded lid/num are always read fresh.
+        """
+        loaded_num = self._chnNumLoadedSample.get_value()
+        loaded_lid = self._chnLidLoadedSample.get_value()
         self.cats_loaded_lid = loaded_lid
         self.cats_loaded_num = loaded_num
 
-        if -1 not in (loaded_lid, loaded_num):
-            basket, sample = self.lidsample_to_basketsample(loaded_lid, loaded_num)
-            address = Pin.get_sample_address(basket, sample)
-            new_sample = self._get_by_address(address)
+        if None in (loaded_lid, loaded_num) or -1 in (loaded_lid, loaded_num):
+            current = None
         else:
-            basket = sample = None
-            new_sample = None
-            address = "None"
+            basket, sample = self.lidsample_to_basketsample(loaded_lid, loaded_num)
+            current = self._get_by_address(Pin.get_sample_address(basket, sample))
 
-        logging.getLogger("HWR").info("SOLEILCats: loaded sample %s", address)
-        old_sample = self.get_loaded_sample(puck=basket, sample=sample)
-
-        if old_sample != new_sample:
-            if old_sample is not None:
-                old_sample._set_loaded(False, True)
-            if new_sample is not None:
-                new_sample._set_loaded(True, True)
-            if (
-                old_sample is None
-                or new_sample is None
-                or old_sample.get_address() != new_sample.get_address()
-            ):
-                self._trigger_loaded_sample_changed_event(new_sample)
-                self._trigger_info_changed_event()
-        self._trigger_info_changed_event()
-        logging.getLogger("HWR").debug(
-            "SOLEILCats: _update_loaded_sample took %.3fs", time.time() - start
+        previous = self.former_loaded
+        same_address = (
+            previous is not None
+            and current is not None
+            and previous.get_address() == current.get_address()
         )
+        if current is previous or same_address:
+            return
+
+        if previous is not None:
+            previous._set_loaded(False, True)
+        if current is not None:
+            current._set_loaded(True, True)
+        self.former_loaded = current
+
+        address = current.get_address() if current is not None else "None"
+        logging.getLogger("HWR").info("SOLEILCats: loaded sample %s", address)
+        self._trigger_loaded_sample_changed_event(current)
+        self._trigger_info_changed_event()
 
     def cats_state_changed(self, value=None):
         logging.debug("SOLEILCats: state_changed %s", value)
