@@ -96,6 +96,11 @@ class SOLEILCats(Cats90):
         self.component_by_address = {}
         self.basket_channels = []
         self.basket_presence = []
+        # Strong references to the channel "update" slots. The dispatcher holds
+        # receivers weakly (weak=True), so a freshly-built wrapped closure passed
+        # straight to connect_signal would be garbage-collected right after init,
+        # silently killing every polled update. Keep them alive here.
+        self._channel_slots = {}
         # Connection-health flag. Flipped by handlers and probes:
         #   "UNKNOWN" — pre-init / not yet probed
         #   "ONLINE"  — last read/probe succeeded
@@ -210,9 +215,12 @@ class SOLEILCats(Cats90):
                 self._set_connection_state(
                     "OFFLINE", "%s read failed: %s" % (channel_name, exc)
                 )
-            channel.connect_signal(
-                "update", self._wrap_handler(channel_name, handler)
-            )
+            # Retain a strong ref to the wrapped closure (see __init__): the
+            # dispatcher stores receivers weakly, so an inline closure would be
+            # collected after init and no update would ever be delivered.
+            wrapped = self._wrap_handler(channel_name, handler)
+            self._channel_slots[channel_name] = wrapped
+            channel.connect_signal("update", wrapped)
 
         # Per-sample channels (no auto-handler — read on demand)
         for name in ("_chnNumLoadedSample", "_chnLidLoadedSample"):
