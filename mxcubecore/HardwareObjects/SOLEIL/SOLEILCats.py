@@ -542,10 +542,26 @@ class SOLEILCats(Cats90):
             "0",
             "0",
         ]
+        # Choose the CATS operation the same way the base Cats90._do_load does:
+        # a plain put (`_cmdLoad`) when the goniometer is empty, and a sample
+        # exchange (`_cmdChainedLoad`, unmount-then-mount) when one is already
+        # mounted. `has_loaded_sample()` delegates to the diffractometer's
+        # `SampleIsLoaded` — the authority on what is on the gonio. The argin is
+        # identical for both commands; only the command object differs.
+        if self.has_loaded_sample():
+            command = self._cmdChainedLoad
+            operation = "chained load"
+        else:
+            command = self._cmdLoad
+            operation = "load"
         logging.getLogger("HWR").info(
-            "SOLEILCats: load puck=%d sample=%d argin=%s", puck, sampleno, argin
+            "SOLEILCats: %s puck=%d sample=%d argin=%s",
+            operation,
+            puck,
+            sampleno,
+            argin,
         )
-        result = self._execute_server_task(self._cmdChainedLoad, argin)
+        result = self._execute_server_task(command, argin)
         # Publish the new loaded sample. Idempotent — also fires from the
         # loaded-sample channel update — but doing it here guarantees the change
         # is out before we return. `_mount_sample` needs a truthy return to
