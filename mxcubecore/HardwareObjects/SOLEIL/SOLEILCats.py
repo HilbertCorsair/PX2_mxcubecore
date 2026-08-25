@@ -22,6 +22,7 @@ from mxcubecore.HardwareObjects.Cats90 import (
     Pin,
     SpineBasket,
     TOOL_DOUBLE_GRIPPER,
+    TOOL_SPINE,
     TOOL_UNIPUCK,
     UnipuckBasket,
 )
@@ -626,6 +627,37 @@ class SOLEILCats(Cats90):
     def assert_not_charging(self):
         if self.cats_running:
             raise Exception("Sample Changer is in Charging mode")
+
+    def _effective_basket_type(self, basketno):
+        """Return the puck type for ``basketno`` (1-based).
+
+        SOLEIL does not read ``CassetteType`` from the CATS DS, so
+        ``basket_types`` stays ``[None, ...]`` (which drives the SoleilPuck
+        container tree in ``_init_sc_contents``). Fall back to the
+        ``default_basket_type`` (UniPuck) so tool/type resolution does not
+        collapse to -1 and get rejected by the DS on load/unload.
+        """
+        basket_type = self.basket_types[basketno - 1]
+        if basket_type is None:
+            basket_type = self.default_basket_type
+        return basket_type
+
+    def tool_for_basket(self, basketno):
+        if self._effective_basket_type(basketno) == BASKET_SPINE:
+            tool = TOOL_SPINE
+        else:
+            tool = self.unipuck_tool
+        logging.getLogger("HWR").debug(
+            "SOLEILCats: tool for basket %s is %s", basketno, tool
+        )
+        return tool
+
+    def get_cassette_type(self, basketno):
+        if self.is_isara():
+            return 1
+        if self._effective_basket_type(basketno) == BASKET_SPINE:
+            return 0
+        return 1
 
     # ------------------------------------------------------------------
     # MAINTENANCE TRAJECTORIES — exposed via SOLEILCatsMaint proxy
