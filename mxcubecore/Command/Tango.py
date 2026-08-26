@@ -62,6 +62,7 @@ class TangoCommand(CommandObject):
         self.command = command
         self.device_name = tangoname
         self.device = None
+        self.timeout = int(kwargs.pop("timeout", 3000))
 
     def init_device(self):
         try:
@@ -79,6 +80,8 @@ class TangoCommand(CommandObject):
             except tango.ConnectionFailed:
                 self.device = None
                 raise ConnectionError
+            else:
+                self.device.set_timeout_millis(self.timeout)
 
     def __call__(self, *args, **kwargs):
         self.emit("commandBeginWaitReply", (str(self.name()),))

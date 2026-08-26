@@ -67,8 +67,7 @@ class SOLEILCats(Cats90):
         "openlid3": "_cmdOpenLid3",
         "closelid3": "_cmdCloseLid3",
         "home": "_cmdHome",
-        "dry": "_cmdDry",
-        "soak": "_cmdSoak",
+        "drysoak": "_cmdDrySoak",
         "back": "_cmdBack",
         "safe": "_cmdSafe",
         "abort": "_cmdAbort",
@@ -116,16 +115,6 @@ class SOLEILCats(Cats90):
         self.read_datamatrix = False
         self.unipuck_tool = TOOL_UNIPUCK
         self.former_loaded = None
-        # Guards against a second load/unload command being sent to the CATS DS
-        # while one is already executing. load() and unload() are reachable from
-        # two independent sources (the web adapter and the queue sample entry),
-        # and their "is a sample already mounted?" checks read `SampleIsLoaded`,
-        # which lags the arm. If two requests race in before that channel
-        # updates, both would otherwise fire a Tango command — the second one
-        # lands on the moving arm and fails ("Failed to run tango command").
-        # This flag makes the transfer the single source: the first request
-        # runs, any concurrent duplicate is dropped.
-        self._transfer_in_progress = False
         self.cats_device = None
         self.cats_datamatrix = ""
         self.cats_loaded_lid = None
@@ -502,128 +491,105 @@ class SOLEILCats(Cats90):
     # Power / load / unload
     # ------------------------------------------------------------------
 
-    def check_power_on(self):
-        if not self._chnPowered.get_value():
-            logging.getLogger().info("SOLEILCats: powering on the arm")
-            try:
-                self._cmdPowerOn()
-                gevent.sleep(2)
-            except Exception:
-                # Not fatal here (the caller proceeds and the CATS command that
-                # follows will fail loudly if the arm really is unpowered), but
-                # surface it at WARNING so it isn't lost in the INFO stream.
-                logging.getLogger("HWR").warning(
-                    "SOLEILCats: powerOn exception %s", traceback.format_exc()
-                )
-
     def load(self, sample=None, wait=True):
-        if self._transfer_in_progress:
+        self._update_state()
+        logging.getLogger().info("SOLEILCats: load")
+        self.assert_not_charging()
+
+        # `sample` arrives as a container address string ("basket:sample",
+        # e.g. "1:01") from the web adapter / queue, or as a Pin component.
+        # Resolve it to the registered component and read its basket/vial —
+        # the same path the base Cats90.load uses (no custom separator).
+        component = self._resolve_component(sample)
+        if component is None:
+            raise Exception("SOLEILCats: no sample selected to load")
+        puck = component.get_basket_no()
+        sampleno = component.get_vial_no()
+        logging.getLogger("HWR").info(
+            "SOLEILCats: load component %s", component.get_address()
+        )
+
+        lid, sample_in_lid = self.basketsample_to_lidsample(puck, sampleno)
+        tool = self.tool_for_basket(puck)
+        stype = self.get_cassette_type(puck)
+        # CATS DS `getput` argin: [tool, lid, sample, type, newmode,
+        # xshift, yshift, zshift]. Sent to the Tango command declared in the
+        # YAML — no external socket. (NOTE: argin layout confirmed against
+        # the canonical Cats90._do_load; verify on the beamline vs the DS.)
+        argin = [
+            str(int(tool)),
+            str(int(lid)),
+            str(int(sample_in_lid)),
+            str(int(stype)),
+            "0",
+            "0",
+            "0",
+            "0",
+        ]
+        # Choose the CATS operation the same way the base Cats90._do_load
+        # does: a plain put (`_cmdLoad`) when the goniometer is empty, and a
+        # sample exchange (`_cmdChainedLoad`, unmount-then-mount) when one is
+        # already mounted. `has_loaded_sample()` delegates to the
+        # diffractometer's `SampleIsLoaded` — the authority on what is on the
+        # gonio. The argin is identical for both commands; only the command
+        # object differs.
+        if self.has_loaded_sample():
+            command = self._cmdChainedLoad
+            operation = "chained load"
+        else:
+            command = self._cmdLoad
+            operation = "load"
+        logging.getLogger("HWR").info(
+            "SOLEILCats: %s puck=%d sample=%d argin=%s",
+            operation,
+            puck,
+            sampleno,
+            argin,
+        )
+        # Only send the command while the arm is idle. If a path is already
+        # running the CATS DS would reject a second command (and the first is
+        # already doing the work), so do nothing.
+        if self._is_device_moving():
             logging.getLogger("HWR").warning(
-                "SOLEILCats: load(%s) ignored — a transfer is already running; "
-                "not sending a second command to the CATS DS",
-                sample,
+                "SOLEILCats: device moving — skipping %s", operation
             )
-            return True
-        self._transfer_in_progress = True
-        try:
-            self._update_state()
-            logging.getLogger().info("SOLEILCats: load")
-            self.assert_not_charging()
-            self.check_power_on()
-
-            # `sample` arrives as a container address string ("basket:sample",
-            # e.g. "1:01") from the web adapter / queue, or as a Pin component.
-            # Resolve it to the registered component and read its basket/vial —
-            # the same path the base Cats90.load uses (no custom separator).
-            component = self._resolve_component(sample)
-            if component is None:
-                raise Exception("SOLEILCats: no sample selected to load")
-            puck = component.get_basket_no()
-            sampleno = component.get_vial_no()
-            logging.getLogger("HWR").info(
-                "SOLEILCats: load component %s", component.get_address()
-            )
-
-            lid, sample_in_lid = self.basketsample_to_lidsample(puck, sampleno)
-            tool = self.tool_for_basket(puck)
-            stype = self.get_cassette_type(puck)
-            # CATS DS `getput` argin: [tool, lid, sample, type, newmode,
-            # xshift, yshift, zshift]. Sent to the Tango command declared in the
-            # YAML — no external socket. (NOTE: argin layout confirmed against
-            # the canonical Cats90._do_load; verify on the beamline vs the DS.)
-            argin = [
-                str(int(tool)),
-                str(int(lid)),
-                str(int(sample_in_lid)),
-                str(int(stype)),
-                "0",
-                "0",
-                "0",
-                "0",
-            ]
-            # Choose the CATS operation the same way the base Cats90._do_load
-            # does: a plain put (`_cmdLoad`) when the goniometer is empty, and a
-            # sample exchange (`_cmdChainedLoad`, unmount-then-mount) when one is
-            # already mounted. `has_loaded_sample()` delegates to the
-            # diffractometer's `SampleIsLoaded` — the authority on what is on the
-            # gonio. The argin is identical for both commands; only the command
-            # object differs.
-            if self.has_loaded_sample():
-                command = self._cmdChainedLoad
-                operation = "chained load"
-            else:
-                command = self._cmdLoad
-                operation = "load"
-            logging.getLogger("HWR").info(
-                "SOLEILCats: %s puck=%d sample=%d argin=%s",
-                operation,
-                puck,
-                sampleno,
-                argin,
-            )
-            result = self._execute_server_task(command, argin)
-            # Publish the new loaded sample. Idempotent — also fires from the
-            # loaded-sample channel update — but doing it here guarantees the
-            # change is out before we return. `_mount_sample` needs a truthy
-            # return to start autoloop centring and run its post-mount cleanup.
-            self._update_loaded_sample()
-            return result
-        finally:
-            self._transfer_in_progress = False
+            return None
+        result = self._execute_server_task(command, argin)
+        # Publish the new loaded sample. Idempotent — also fires from the
+        # loaded-sample channel update — but doing it here guarantees the
+        # change is out before we return. `_mount_sample` needs a truthy
+        # return to start autoloop centring and run its post-mount cleanup.
+        self._update_loaded_sample()
+        return result
 
     def unload(self, sample_slot=None, wait=True):
-        if self._transfer_in_progress:
+        logging.getLogger().info("SOLEILCats: unload")
+        self.assert_not_charging()
+
+        loaded_lid = self._chnLidLoadedSample.get_value()
+        loaded_num = self._chnNumLoadedSample.get_value()
+        if loaded_lid in (None, -1):
             logging.getLogger("HWR").warning(
-                "SOLEILCats: unload(%s) ignored — a transfer is already running; "
-                "not sending a second command to the CATS DS",
-                sample_slot,
+                "SOLEILCats: unload — no sample mounted (lid=%s)", loaded_lid
             )
             return
-        self._transfer_in_progress = True
-        try:
-            logging.getLogger().info("SOLEILCats: unload")
-            self.assert_not_charging()
-            self.check_power_on()
-
-            loaded_lid = self._chnLidLoadedSample.get_value()
-            loaded_num = self._chnNumLoadedSample.get_value()
-            if loaded_lid in (None, -1):
-                logging.getLogger("HWR").warning(
-                    "SOLEILCats: unload — no sample mounted (lid=%s)", loaded_lid
-                )
-                return
-            loaded_basket, _ = self.lidsample_to_basketsample(loaded_lid, loaded_num)
-            tool = self.tool_for_basket(loaded_basket)
-            # CATS DS `get` argin: [tool, newmode, xshift, yshift, zshift].
-            argin = [str(int(tool)), "0", "0", "0", "0"]
-            logging.getLogger("HWR").info("SOLEILCats: unload argin=%s", argin)
-            self._execute_server_task(self._cmdUnload, argin)
-            # Publish the transition to "no sample" so the web adapter clears the
-            # loaded sample and dismisses the "Sample changer in operation"
-            # dialog. Idempotent; also fires from the loaded-sample channel.
-            self._update_loaded_sample()
-        finally:
-            self._transfer_in_progress = False
+        loaded_basket, _ = self.lidsample_to_basketsample(loaded_lid, loaded_num)
+        tool = self.tool_for_basket(loaded_basket)
+        # CATS DS `get` argin: [tool, newmode, xshift, yshift, zshift].
+        argin = [str(int(tool)), "0", "0", "0", "0"]
+        logging.getLogger("HWR").info("SOLEILCats: unload argin=%s", argin)
+        # Only send while the arm is idle; a running path would reject the
+        # command, so do nothing.
+        if self._is_device_moving():
+            logging.getLogger("HWR").warning(
+                "SOLEILCats: device moving — skipping unload"
+            )
+            return
+        self._execute_server_task(self._cmdUnload, argin)
+        # Publish the transition to "no sample" so the web adapter clears the
+        # loaded sample and dismisses the "Sample changer in operation"
+        # dialog. Idempotent; also fires from the loaded-sample channel.
+        self._update_loaded_sample()
 
     def _update_loaded_sample(self, *args):
         """Publish the currently mounted sample when it changes.
@@ -1024,8 +990,7 @@ class SOLEILCats(Cats90):
             "closelid2": self._lid2state and self._powered and ready,
             "openlid3": (not self._lid3state) and self._powered and ready,
             "closelid3": self._lid3state and self._powered and ready,
-            "dry": (not self._running) and self._powered and ready,
-            "soak": (not self._running) and self._powered and ready,
+            "drysoak": (not self._running) and self._powered and ready,
             "home": (not self._running) and self._powered and ready,
             "back": (not self._running) and self._powered and ready,
             "safe": (not self._running) and self._powered and ready,
@@ -1079,9 +1044,8 @@ class SOLEILCats(Cats90):
             [
                 "Actions",
                 [
-                    ["home", "Home", "Actions", "Home (trajectory)"],
-                    ["dry", "Dry", "Actions", "Dry (trajectory)"],
-                    ["soak", "Soak", "Actions", "Soak (trajectory)"],
+                    ["home", "Home"],
+                    ["drysoak", "Dry and Soak"],
                 ],
             ],
             [
@@ -1099,6 +1063,13 @@ class SOLEILCats(Cats90):
             ],
             ["Abort", [["abort", "Abort", "Abort execution of command"]]],
         ]
+
+    def _is_device_moving(self):
+        """True when the CATS arm is running a path (a load/unload/move in
+        progress). Reads the same ``_chnPathRunning`` channel the task loop
+        polls, so a command is only sent to the Tango device while it is idle.
+        """
+        return str(self._chnPathRunning.get_value()).lower() == "true"
 
     def _execute_server_task(self, method, *args):
         method(*args)
@@ -1120,16 +1091,16 @@ class SOLEILCats(Cats90):
 
         tool = self.get_current_tool()
 
-        if cmd_name in ("dry", "safe", "home"):
+        if cmd_name in ("safe", "home"):
             if tool is None:
                 raise Exception(
                     "Cannot detect TOOL type. %s ignored." % cmd_name
                 )
             if args is None:
                 args = [tool]
-        elif cmd_name == "soak":
+        elif cmd_name == "drysoak":
             if tool not in (TOOL_DOUBLE_GRIPPER, TOOL_UNIPUCK):
-                raise Exception("Can SOAK only with UNIPUCK or DOUBLE tool")
+                raise Exception("Can DRY & SOAK only with UNIPUCK or DOUBLE tool")
             args = [str(tool), str(self.soak_lid)]
         elif cmd_name == "back":
             if tool is None:
