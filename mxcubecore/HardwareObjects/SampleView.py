@@ -434,14 +434,20 @@ class SampleView(AbstractSampleView):
         diffr = HWR.beamline.diffractometer
         pixels_per_mm_x, pixels_per_mm_y = diffr.get_pixels_per_mm()
         if not all([pixels_per_mm_x, pixels_per_mm_y]):
-            logging.getLogger("HWR").exception("Cannot move to beam")
+            logging.getLogger("HWR").error(
+                "Cannot move to beam: no pixels_per_mm calibration (x=%r, y=%r)",
+                pixels_per_mm_x,
+                pixels_per_mm_y,
+            )
+            return
 
         # here added the calculation for moving to the beam position
         dx = (x - beam_pos_x) / pixels_per_mm_x
         dy = (y - beam_pos_y) / pixels_per_mm_y
 
         diffr.wait_status_ready(5)
-        motors_dict = self.get_positions()
+        raw_positions = self.get_positions()
+        motors_dict = dict(raw_positions)
         for key, val in motors_dict.items():
             motors_dict.update({key: self.centring_motors[key].direction * val})
         omega_angle = math.radians(motors_dict.get("omega", 0))
@@ -470,18 +476,37 @@ class SampleView(AbstractSampleView):
         sampx = motors_dict.get("sampx") - sx
         sampy = motors_dict.get("sampy") + sy
         phiy = motors_dict.get("phiy") + dx
-        phiz = self.centring_motors.get("phiz").get_value()
-        if self.chi_angle:
-            phiy = self.centring_motors.get("phiy").get_value()
-            phiz = motors_dict.get("phiz") + dy
 
         sampx *= self.centring_motors.get("sampx").direction
         sampy *= self.centring_motors.get("sampy").direction
         phiy *= self.centring_motors.get("phiy").direction
-        phiz *= self.centring_motors.get("phiz").direction
 
-        move_dict = {"sampx": sampx, "sampy": sampy, "phiy": phiy, "phiz": phiz}
-        diffr.set_value_motors(move_dict)
+        # Without a chi tilt the horizontal correction goes to phiy
+        # (AlignmentY) and the vertical one to the centring table
+        # (sampx/sampy, omega dependent) — phiz (AlignmentZ) must stay where
+        # it is. Only a tilted geometry swaps the two axes over.
+        move_dict = {"sampx": sampx, "sampy": sampy, "phiy": phiy}
+        if self.chi_angle:
+            # Tilted geometry: phiy holds its position and phiz takes dy.
+            phiy = motors_dict.get("phiy")
+            phiz = motors_dict.get("phiz") + dy
+            move_dict["phiy"] = phiy * self.centring_motors.get("phiy").direction
+            move_dict["phiz"] = phiz * self.centring_motors.get("phiz").direction
+
+        logging.getLogger("HWR").debug(
+            "move_to_beam: click=(%s, %s) beam=(%s, %s) dx=%.4f mm dy=%.4f mm "
+            "omega=%.2f current=%s target=%s",
+            x,
+            y,
+            beam_pos_x,
+            beam_pos_y,
+            dx,
+            dy,
+            raw_positions.get("omega", 0),
+            {key: raw_positions.get(key) for key in move_dict},
+            move_dict,
+        )
+        diffr.set_value_motors(move_dict, simultaneous=True, timeout=30)
         diffr.save_centring_positions()
 
     def get_snapshot(

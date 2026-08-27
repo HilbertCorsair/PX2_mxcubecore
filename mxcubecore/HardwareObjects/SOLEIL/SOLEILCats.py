@@ -60,6 +60,7 @@ class SOLEILCats(Cats90):
         "powerOn": "_cmdPowerOn",
         "powerOff": "_cmdPowerOff",
         "regulon": "_cmdRegulOn",
+        "reguloff": "_cmdRegulOff",
         "openlid1": "_cmdOpenLid1",
         "closelid1": "_cmdCloseLid1",
         "openlid2": "_cmdOpenLid2",
@@ -68,6 +69,7 @@ class SOLEILCats(Cats90):
         "closelid3": "_cmdCloseLid3",
         "home": "_cmdHome",
         "drysoak": "_cmdDrySoak",
+        "dryht": "_cmdDryHt",
         "back": "_cmdBack",
         "safe": "_cmdSafe",
         "abort": "_cmdAbort",
@@ -274,6 +276,7 @@ class SOLEILCats(Cats90):
             "_cmdHome",
             "_cmdDry",
             "_cmdDrySoak",
+            "_cmdDryHt",
             "_cmdSoak",
             "_cmdResetParameters",
             "_cmdClearMemory",
@@ -562,6 +565,22 @@ class SOLEILCats(Cats90):
         self._update_loaded_sample()
         return result
 
+    def wash(self, wait=True):
+        """Unmount and re-mount the currently loaded pin.
+
+        `load` already issues `_cmdChainedLoad` (CATS `getput`) whenever
+        something is on the goniometer, and — unlike Cats90 — has no
+        "already loaded" guard, so a wash is a chained load of the mounted
+        address. The base Cats90.wash() cannot be used here: it calls
+        `_execute_task` with the 4-argument AbstractSampleChanger signature,
+        while this class overrides it with a 3-argument one.
+        """
+        component = self.get_loaded_sample()
+        if component is None:
+            raise Exception("SOLEILCats: cannot wash, no sample mounted")
+        logging.getLogger("HWR").info("SOLEILCats: wash %s", component.get_address())
+        return self.load(component, wait=wait)
+
     def unload(self, sample_slot=None, wait=True):
         logging.getLogger().info("SOLEILCats: unload")
         self.assert_not_charging()
@@ -742,6 +761,12 @@ class SOLEILCats(Cats90):
     def _do_dry_gripper(self):
         self._cmdDrySoak([str(self.get_current_tool()), str(self.soak_lid)])
 
+    def _do_dry_ht(self):
+        # Room-temperature dry & soak. The CATS DS `dry_ht` trajectory takes
+        # no arguments; its duration is covered by the command timeout
+        # declared in the YAML, not by _execute_server_task.
+        self._cmdDryHt()
+
     def _do_set_on_diff(self, sample):
         if sample is None:
             raise Exception("No sample selected")
@@ -833,7 +858,10 @@ class SOLEILCats(Cats90):
         self._update_global_state()
 
     def _update_regulation_state(self, value):
-        self._regulating = value
+        # Coerced to a real bool: get_global_state gates the regulon/reguloff
+        # pair with `is True` / `is False` so a not-yet-read None disables
+        # both, and a numpy bool from the Tango layer would defeat that.
+        self._regulating = None if value is None else bool(value)
         self.emit("regulationStateChanged", (value,))
         self._update_global_state()
 
@@ -983,7 +1011,13 @@ class SOLEILCats(Cats90):
         cmd_state = {
             "powerOn": online and (self._powered is False),
             "powerOff": online and (self._powered is True),
-            "regulon": (not self._regulating) and ready,
+            # LN2 regulation is a toggle, and the two directions are gated on
+            # power only — never on `ready`. Regulation is independent of what
+            # the arm is doing, and the UI must be able to switch it back off
+            # (or on) while a trajectory runs. `is True/False` so an unread
+            # `_regulating is None` disables both rather than guessing.
+            "regulon": online and self._powered and (self._regulating is False),
+            "reguloff": online and self._powered and (self._regulating is True),
             "openlid1": (not self._lid1state) and self._powered and ready,
             "closelid1": self._lid1state and self._powered and ready,
             "openlid2": (not self._lid2state) and self._powered and ready,
@@ -991,6 +1025,7 @@ class SOLEILCats(Cats90):
             "openlid3": (not self._lid3state) and self._powered and ready,
             "closelid3": self._lid3state and self._powered and ready,
             "drysoak": (not self._running) and self._powered and ready,
+            "dryht": (not self._running) and self._powered and ready,
             "home": (not self._running) and self._powered and ready,
             "back": (not self._running) and self._powered and ready,
             "safe": (not self._running) and self._powered and ready,
@@ -1027,7 +1062,11 @@ class SOLEILCats(Cats90):
                 [
                     ["powerOn", "PowerOn", "Switch Power On"],
                     ["powerOff", "PowerOff", "Switch Power Off"],
+                    # Rendered by the web UI as a single reactive ON/OFF
+                    # toggle (see SampleChangerMaintenance.jsx); both entries
+                    # must exist so either direction can be dispatched.
                     ["regulon", "Regulation On", "Switch LN2 Regulation On"],
+                    ["reguloff", "Regulation Off", "Switch LN2 Regulation Off"],
                 ],
             ],
             [
@@ -1046,6 +1085,7 @@ class SOLEILCats(Cats90):
                 [
                     ["home", "Home"],
                     ["drysoak", "Dry and Soak"],
+                    ["dryht", "D&S room temp", "Dry and soak at room temperature"],
                 ],
             ],
             [
