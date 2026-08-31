@@ -77,6 +77,8 @@ class SampleView(AbstractSampleView):
         self.centring_status = {}
         self.rotation_reference = {}
         self.chi_angle = None
+        self.transposed_camera_axes = False
+        self.omega_phase_offset = 0.0
 
     def init(self):
         super().init()
@@ -97,6 +99,21 @@ class SampleView(AbstractSampleView):
         diffr = HWR.beamline.diffractometer
 
         self.chi_angle = self.get_property("chi_angle") or 0
+
+        # How the goniometer is oriented in the camera frame. The geometry in
+        # this class is written for the upstream MD2 layout, where the spindle
+        # projects onto the screen's horizontal axis: the spindle-parallel
+        # translation (phiy) carries horizontal offsets and the centring table
+        # (sampx/sampy) carries vertical ones. A goniometer mounted a quarter
+        # turn round -- spindle vertical on screen, as at PX2 -- swaps those
+        # two roles over.
+        self.transposed_camera_axes = bool(
+            self.get_property("transposed_camera_axes", False)
+        )
+        # Residual rotation of the centring table about the spindle relative to
+        # the reported omega zero, in degrees.
+        self.omega_phase_offset = float(self.get_property("omega_phase_offset", 0))
+
         for role in centring_motor_roles:
             if role in diffr.motors_hwobj_dict:
                 motor_obj = diffr.motors_hwobj_dict[role]
@@ -139,6 +156,49 @@ class SampleView(AbstractSampleView):
             motors_dict.update({key: val.motor.get_value()})
         return motors_dict
 
+    def _screen_to_gonio(
+        self, dx: float, dy: float
+    ) -> tuple[float, float]:
+        """Convert screen offsets to the goniometer frame.
+
+        The goniometer frame is (along-spindle, transverse-to-spindle), which
+        is what all the centring algebra below is written in. On the upstream
+        layout it coincides with (screen x, screen y); with the spindle
+        standing vertically in the camera frame the two are swapped.
+
+        Args:
+            dx: Horizontal screen offset [mm]
+            dy: Vertical screen offset [mm]
+
+        Returns:
+            (along-spindle, transverse) offsets [mm]
+        """
+        return (dy, dx) if self.transposed_camera_axes else (dx, dy)
+
+    def _gonio_to_screen(
+        self, d_along: float, d_transverse: float
+    ) -> tuple[float, float]:
+        """Inverse of :meth:`_screen_to_gonio`.
+
+        Args:
+            d_along: Offset along the spindle [mm]
+            d_transverse: Offset transverse to the spindle [mm]
+
+        Returns:
+            (horizontal, vertical) screen offsets [mm]
+        """
+        if self.transposed_camera_axes:
+            return d_transverse, d_along
+        return d_along, d_transverse
+
+    def _omega_angle(self, motors_dict: dict[str, float]) -> float:
+        """Spindle angle used by the centring-table rotation, in radians.
+
+        Args:
+            motors_dict: Direction-corrected motor positions.
+        """
+        return math.radians(motors_dict.get("omega", 0) + self.omega_phase_offset)
+
     def get_centred_point_from_coord(self, x, y, return_by_names=None):
         """Get the motor positions form x,y pixel coordinates"""
 
@@ -148,15 +208,17 @@ class SampleView(AbstractSampleView):
         if not all([pixels_per_mm_x, pixels_per_mm_y]):
             return 0, 0
 
-        # distance from the point to the beam
-        dx = (x - beam_pos_x) / pixels_per_mm_x
-        dy = (y - beam_pos_y) / pixels_per_mm_y
+        # distance from the point to the beam, in the goniometer frame
+        d_along, d_trans = self._screen_to_gonio(
+            (x - beam_pos_x) / pixels_per_mm_x,
+            (y - beam_pos_y) / pixels_per_mm_y,
+        )
 
         motors_dict = self.get_positions()
         for key, val in motors_dict.items():
             motors_dict.update({key: self.centring_motors[key].direction * val})
 
-        omega_angle = math.radians(motors_dict.get("omega", 0))
+        omega_angle = self._omega_angle(motors_dict)
         rot_matrix = np.matrix(
             [
                 [math.cos(omega_angle), -math.sin(omega_angle)],
@@ -164,9 +226,9 @@ class SampleView(AbstractSampleView):
             ]
         )
         inv_rot_matrix = np.array(rot_matrix.I)
-        dsampx, dsampy = np.dot(np.array([0, dy]), inv_rot_matrix)
+        dsampx, dsampy = np.dot(np.array([0, d_trans]), inv_rot_matrix)
         if self.chi_angle:
-            dsampx, dsampy = np.dot(np.array([dx, dy]), inv_rot_matrix)
+            dsampx, dsampy = np.dot(np.array([d_along, d_trans]), inv_rot_matrix)
 
         chi_angle = math.radians(-self.chi_angle)
         chi_rot = np.matrix(
@@ -179,11 +241,11 @@ class SampleView(AbstractSampleView):
 
         sampx = -motors_dict.get("sampx") + sx
         sampy = motors_dict.get("sampy") + sy
-        phiy = motors_dict.get("phiy") + dx
+        phiy = motors_dict.get("phiy") + d_along
         phiz = motors_dict.get("phiz")
         if self.chi_angle:
             phiy = motors_dict.get("phiy")
-            phiz = motors_dict.get("phiz") + dy
+            phiz = motors_dict.get("phiz") + d_trans
 
         return {
             "omega": motors_dict.get("omega"),
@@ -215,7 +277,7 @@ class SampleView(AbstractSampleView):
             new_pos_dict[key] = self.centring_motors[key].direction * (
                 val - motors_dict.get(key)
             )
-        omega_angle = math.radians(motors_dict.get("omega", 0))
+        omega_angle = self._omega_angle(motors_dict)
         rot_matrix = np.matrix(
             [
                 [math.cos(omega_angle), -math.sin(omega_angle)],
@@ -239,8 +301,15 @@ class SampleView(AbstractSampleView):
 
         beam_pos_x, beam_pos_y = HWR.beamline.beam.get_beam_position_on_screen()
 
-        x = (sx + new_pos_dict.get("phiy")) * pixels_per_mm_x + beam_pos_x
-        y = (sy + new_pos_dict.get("phiz")) * pixels_per_mm_y + beam_pos_y
+        # `phiz` is absent from any position dict built by a chi-less
+        # move_to_beam, so default it rather than letting `None` reach the
+        # arithmetic.
+        d_along = sx + (new_pos_dict.get("phiy") or 0.0)
+        d_trans = sy + (new_pos_dict.get("phiz") or 0.0)
+        d_horizontal, d_vertical = self._gonio_to_screen(d_along, d_trans)
+
+        x = d_horizontal * pixels_per_mm_x + beam_pos_x
+        y = d_vertical * pixels_per_mm_y + beam_pos_y
         return int(x), int(y)
 
     def start_manual_centring(self, nb_click: int = 3):
@@ -267,6 +336,7 @@ class SampleView(AbstractSampleView):
             beam_pos[1],
             chi_angle=self.chi_angle,
             n_points=nb_click,
+            transposed=self.transposed_camera_axes,
         )
 
         self.current_centring_procedure.link(self.manual_centring_done)
@@ -341,6 +411,11 @@ class SampleView(AbstractSampleView):
         """Reject the current centred position."""
         if self.current_centring_procedure:
             self.current_centring_procedure.kill(block=True)
+        # Every other terminal path clears these; without it the killed
+        # greenlet stays truthy and the next click is routed into a dead
+        # centring procedure.
+        self.current_centring_procedure = None
+        self.current_centring_method = None
         self.centring_status["valid"] = False
         self.emit("centringAccepted", (False, self.get_centring_status()))
         logging.getLogger("user_level_log").info("Centring cancelled")
@@ -418,6 +493,7 @@ class SampleView(AbstractSampleView):
                 beam_pos_x,
                 beam_pos_y,
                 chi_angle=self.chi_angle,
+                transposed=self.transposed_camera_axes,
             )
 
             self.current_centring_method = "Automatic"
@@ -441,16 +517,19 @@ class SampleView(AbstractSampleView):
             )
             return
 
-        # here added the calculation for moving to the beam position
+        # Offset from the beam mark, resolved into the goniometer frame: the
+        # component along the spindle is taken up by phiy on its own, the
+        # transverse one by the centring table (which rotates with omega).
         dx = (x - beam_pos_x) / pixels_per_mm_x
         dy = (y - beam_pos_y) / pixels_per_mm_y
+        d_along, d_trans = self._screen_to_gonio(dx, dy)
 
         diffr.wait_status_ready(5)
         raw_positions = self.get_positions()
         motors_dict = dict(raw_positions)
         for key, val in motors_dict.items():
             motors_dict.update({key: self.centring_motors[key].direction * val})
-        omega_angle = math.radians(motors_dict.get("omega", 0))
+        omega_angle = self._omega_angle(motors_dict)
 
         rot_matrix = np.matrix(
             [
@@ -459,9 +538,9 @@ class SampleView(AbstractSampleView):
             ]
         )
         inv_rot_matrix = np.array(rot_matrix.I)
-        dsampx, dsampy = np.dot(np.array([0, dy]), inv_rot_matrix)
+        dsampx, dsampy = np.dot(np.array([0, d_trans]), inv_rot_matrix)
         if self.chi_angle:
-            dsampx, dsampy = np.dot(np.array([dx, 0]), inv_rot_matrix)
+            dsampx, dsampy = np.dot(np.array([d_along, 0]), inv_rot_matrix)
 
         chi_angle = math.radians(-self.chi_angle)
         chi_rot = np.matrix(
@@ -475,33 +554,39 @@ class SampleView(AbstractSampleView):
 
         sampx = motors_dict.get("sampx") - sx
         sampy = motors_dict.get("sampy") + sy
-        phiy = motors_dict.get("phiy") + dx
+        phiy = motors_dict.get("phiy") + d_along
 
         sampx *= self.centring_motors.get("sampx").direction
         sampy *= self.centring_motors.get("sampy").direction
         phiy *= self.centring_motors.get("phiy").direction
 
-        # Without a chi tilt the horizontal correction goes to phiy
-        # (AlignmentY) and the vertical one to the centring table
-        # (sampx/sampy, omega dependent) — phiz (AlignmentZ) must stay where
-        # it is. Only a tilted geometry swaps the two axes over.
+        # Without a chi tilt the along-spindle correction goes to phiy and the
+        # transverse one to the centring table (sampx/sampy, omega dependent).
+        # phiz stays parked at its centring reference — moving it would take
+        # the spindle itself off the beam. Only a tilted geometry swaps the two
+        # axes over.
         move_dict = {"sampx": sampx, "sampy": sampy, "phiy": phiy}
         if self.chi_angle:
-            # Tilted geometry: phiy holds its position and phiz takes dy.
+            # Tilted geometry: phiy holds its position and phiz takes the
+            # transverse offset.
             phiy = motors_dict.get("phiy")
-            phiz = motors_dict.get("phiz") + dy
+            phiz = motors_dict.get("phiz") + d_trans
             move_dict["phiy"] = phiy * self.centring_motors.get("phiy").direction
             move_dict["phiz"] = phiz * self.centring_motors.get("phiz").direction
 
         logging.getLogger("HWR").debug(
             "move_to_beam: click=(%s, %s) beam=(%s, %s) dx=%.4f mm dy=%.4f mm "
-            "omega=%.2f current=%s target=%s",
+            "along=%.4f mm transverse=%.4f mm transposed=%s omega=%.2f "
+            "current=%s target=%s",
             x,
             y,
             beam_pos_x,
             beam_pos_y,
             dx,
             dy,
+            d_along,
+            d_trans,
+            self.transposed_camera_axes,
             raw_positions.get("omega", 0),
             {key: raw_positions.get(key) for key in move_dict},
             move_dict,

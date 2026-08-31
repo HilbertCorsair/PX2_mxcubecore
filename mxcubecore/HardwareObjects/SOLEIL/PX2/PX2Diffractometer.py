@@ -177,6 +177,14 @@ class PX2Diffractometer(AbstractDiffractometer):
     """SOLEIL Proxima 2A MD2 diffractometer."""
 
     # Convention naming: omega for the rotation axis, phiz/phiy for alignment.
+    #
+    # This table states a hardware fact and nothing else: `phiy` IS AlignmentY.
+    # It is not the place to encode how the goniometer is oriented in the OAV
+    # frame -- that lives in sample_view.yaml as `transposed_camera_axes`,
+    # because `centring_reference_position`, `rotation_reference`
+    # (script: Change_AlignmentZ) and the ui.yaml motor labels all key off the
+    # role names and would silently follow the wrong physical motor if this
+    # mapping lied.
     MOTOR_ROLE_TO_MD2 = {
         "omega": "Omega",
         "phiy": "AlignmentY",

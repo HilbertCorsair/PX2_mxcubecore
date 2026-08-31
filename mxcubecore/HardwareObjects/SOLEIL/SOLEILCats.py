@@ -1025,7 +1025,11 @@ class SOLEILCats(Cats90):
             "openlid3": (not self._lid3state) and self._powered and ready,
             "closelid3": self._lid3state and self._powered and ready,
             "drysoak": (not self._running) and self._powered and ready,
-            "dryht": (not self._running) and self._powered and ready,
+            # Disabled: `dry_ht` is not exported by the CATS Tango DS (see
+            # px2em/cats.py — it is a catsapi/CS8Connection call). Re-enable
+            # with `(not self._running) and self._powered and ready` once the
+            # DS exposes it.
+            "dryht": False,
             "home": (not self._running) and self._powered and ready,
             "back": (not self._running) and self._powered and ready,
             "safe": (not self._running) and self._powered and ready,

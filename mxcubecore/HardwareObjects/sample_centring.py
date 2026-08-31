@@ -111,6 +111,7 @@ def start(
     beam_yc,
     chi_angle=0,
     n_points=3,
+    transposed=False,
 ):
     global CURRENT_CENTRING
 
@@ -129,6 +130,7 @@ def start(
         beam_yc,
         chi_angle,
         n_points,
+        transposed=transposed,
     )
     return CURRENT_CENTRING
 
@@ -446,9 +448,19 @@ def center(
     chi_angle,
     n_points,
     omega_range=180,
+    transposed=False,
 ):
     global USER_CLICKED_EVENT
     X, Y, omega_positions = [], [], []
+
+    # Everything below works in the goniometer frame: X runs along the spindle
+    # and Y transverse to it, which on the upstream layout coincides with
+    # (screen x, screen y). A goniometer whose spindle stands vertically in the
+    # camera frame swaps the two, so transpose the clicks -- and the
+    # calibration and beam centre that go with them -- once, here.
+    if transposed:
+        pixelsPerMm_Hor, pixelsPerMm_Ver = pixelsPerMm_Ver, pixelsPerMm_Hor
+        beam_xc, beam_yc = beam_yc, beam_xc
 
     omega_angle = omega_range / (n_points - 1)
     try:
@@ -463,6 +475,8 @@ def center(
                 )
                 raise RuntimeError("Aborted while waiting for point selection")
             USER_CLICKED_EVENT = gevent.event.AsyncResult()
+            if transposed:
+                x, y = y, x
             X.append(x / float(pixelsPerMm_Hor))
             Y.append(y / float(pixelsPerMm_Ver))
             omega_positions.append(omega.direction * math.radians(omega.get_value()))
@@ -544,6 +558,7 @@ def start_auto(
     n_points=3,
     msg_cb=None,
     new_point_cb=None,
+    transposed=False,
 ):
     global CURRENT_CENTRING
 
@@ -565,6 +580,7 @@ def start_auto(
         n_points,
         msg_cb,
         new_point_cb,
+        transposed=transposed,
     )
     return CURRENT_CENTRING
 
@@ -616,6 +632,7 @@ def auto_center(
     n_points,
     msg_cb,
     new_point_cb,
+    transposed=False,
 ):
     imgWidth = sample_view.camera.get_width()
     imgHeight = sample_view.camera.get_height()
@@ -650,6 +667,7 @@ def auto_center(
             beam_yc,
             chi_angle,
             n_points,
+            transposed=transposed,
         )
 
         for a in range(n_points):
