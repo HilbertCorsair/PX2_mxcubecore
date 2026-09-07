@@ -100,13 +100,11 @@ class SampleView(AbstractSampleView):
 
         self.chi_angle = self.get_property("chi_angle") or 0
 
-        # How the goniometer is oriented in the camera frame. The geometry in
-        # this class is written for the upstream MD2 layout, where the spindle
-        # projects onto the screen's horizontal axis: the spindle-parallel
-        # translation (phiy) carries horizontal offsets and the centring table
-        # (sampx/sampy) carries vertical ones. A goniometer mounted a quarter
-        # turn round -- spindle vertical on screen, as at PX2 -- swaps those
-        # two roles over.
+        # At PX2 the spindle stands vertically on screen, so the on-screen axes
+        # are swapped relative to the goniometer frame this class's algebra is
+        # written in: phiy (along-spindle) carries vertical offsets and the
+        # centring table (sampx/sampy) carries horizontal ones. Set true here;
+        # the swap itself happens in _screen_to_gonio/_gonio_to_screen.
         self.transposed_camera_axes = bool(
             self.get_property("transposed_camera_axes", False)
         )
@@ -127,6 +125,13 @@ class SampleView(AbstractSampleView):
                 self.centring_motors[role].motor.connect(
                     "stateChanged", self._update_shape_positions
                 )
+        # Grids cache the pixel calibration they were drawn with (see
+        # Grid.refresh_hw_snapshot), so a zoom change has to invalidate it the
+        # same way a motor move does.
+        zoom_motor = diffr.get_object_by_role("zoom")
+        if zoom_motor:
+            zoom_motor.connect("stateChanged", self._update_shape_positions)
+
         self._camera = self.get_object_by_role("camera")
         self._last_oav_image = None
 
@@ -239,7 +244,7 @@ class SampleView(AbstractSampleView):
         )
         sx, sy = np.dot(np.array([dsampx, dsampy]), np.array(chi_rot))
 
-        sampx = -motors_dict.get("sampx") + sx
+        sampx = motors_dict.get("sampx") - sx
         sampy = motors_dict.get("sampy") + sy
         phiy = motors_dict.get("phiy") + d_along
         phiz = motors_dict.get("phiz")
@@ -247,12 +252,21 @@ class SampleView(AbstractSampleView):
             phiy = motors_dict.get("phiy")
             phiz = motors_dict.get("phiz") + d_trans
 
-        return {
+        # Back out of the direction-corrected frame the same way move_to_beam
+        # does, so a point built from a click is the position move_to_beam
+        # would drive to. The former hardcoded negation (`-phiy`, `-sampx`) was
+        # only equivalent to this while those motors' direction was -1 and +1
+        # respectively; it inverted as soon as a sign was re-fitted.
+        targets = {
             "omega": motors_dict.get("omega"),
-            "phiy": float(-phiy),
+            "phiy": phiy,
             "phiz": phiz,
-            "sampx": float(-sampx),
-            "sampy": float(sampy),
+            "sampx": sampx,
+            "sampy": sampy,
+        }
+        return {
+            role: float(self.centring_motors[role].direction * value)
+            for role, value in targets.items()
         }
 
     def motor_positions_to_screen(
@@ -707,7 +721,9 @@ class SampleView(AbstractSampleView):
             shape: Shape to add.
         """
         self.shapes[shape.id] = shape
-        shape.shapes_hw_object = self
+
+        if isinstance(shape, Grid):
+            shape.refresh_hw_snapshot()
 
     def add_shape_from_mpos(
         self,
@@ -775,12 +791,7 @@ class SampleView(AbstractSampleView):
         Returns:
             (Shape): The removed shape
         """
-        shape = self.shapes.pop(sid, None)
-
-        if shape:
-            shape.shapes_hw_object = None
-
-        return shape
+        return self.shapes.pop(sid, None)
 
     def select_shape(self, sid):
         """
@@ -1004,6 +1015,25 @@ class Shape:
 
     SHAPE_COUNT = 0
 
+    #: Attributes published to clients (web UI, XML-RPC). The list is explicit
+    #: on purpose: serializing `vars(self)` published whatever a shape happened
+    #: to be carrying, so an attribute added for internal use silently became
+    #: part of the wire format.
+    SERIAL_FIELDS = (
+        "t",
+        "id",
+        "name",
+        "state",
+        "user_state",
+        "label",
+        "screen_coord",
+        "selected",
+        "refs",
+    )
+
+    #: Serialized, but owned by the server: a client cannot write these back.
+    READ_ONLY_FIELDS = ("id", "t", "result")
+
     def __init__(self, mpos_list=None, screen_coord=(-1, -1)):
         Shape.SHAPE_COUNT += 1
         self.t = "S"
@@ -1017,7 +1047,6 @@ class Shape:
         self.screen_coord = screen_coord
         self.selected = False
         self.refs = []
-        self.shapes_hw_object = None
         mpos_list = mpos_list or []
         self.add_cp_from_mp(mpos_list)
 
@@ -1060,26 +1089,27 @@ class Shape:
         if screen_coord:
             self.screen_coord = screen_coord
 
+    @classmethod
+    def writable_fields(cls):
+        """The fields a client is allowed to write back through update_from_dict."""
+        return tuple(f for f in cls.SERIAL_FIELDS if f not in cls.READ_ONLY_FIELDS)
+
     def update_from_dict(self, shape_dict):
-        # We do not allow id or result updates
-        shape_dict.pop("id", None)
-        shape_dict.pop("result", None)
+        writable = self.writable_fields()
 
         for key, value in shape_dict.items():
-            if hasattr(self, key):
+            if key in writable:
                 setattr(self, key, value)
 
     def as_dict(self):
-        cpos_list = [x.as_dict() for x in self.cp_list]
+        """Serialize the shape for clients.
 
-        d = copy.deepcopy(vars(self))
-
-        # Do not serialize Shapes HW Object
-        d.pop("shapes_hw_object")
-
-        # replace cpos_list with a list of motor positions
-        d.pop("cp_list")
-        d["motor_positions"] = str(cpos_list)
+        Pure: no hardware is read and nothing is copied out of the object
+        graph. Only the declared SERIAL_FIELDS are published, plus the centred
+        positions, which are flattened into plain motor dictionaries.
+        """
+        d = {name: getattr(self, name) for name in self.SERIAL_FIELDS}
+        d["motor_positions"] = [cp.as_dict() for cp in self.cp_list]
 
         return d
 
@@ -1102,8 +1132,8 @@ class Point(Shape):
         self.cp_list[0].index = self.name
 
     def as_dict(self):
-        d = Shape.as_dict(self)
-        # replace cpos_list with the motor positions
+        d = super().as_dict()
+        # A point has a single centred position, reported as a plain dict.
         d["motor_positions"] = self.cp_list[0].as_dict()
         return d
 
@@ -1141,6 +1171,33 @@ class Line(Shape):
 class Grid(Shape):
     SHAPE_COUNT = 0
 
+    SERIAL_FIELDS = Shape.SERIAL_FIELDS + (
+        "width",
+        "height",
+        "cell_count_fun",
+        "cell_h_space",
+        "cell_height",
+        "cell_v_space",
+        "cell_width",
+        "num_cols",
+        "num_rows",
+        "result",
+        "result_data_path",
+        "pixels_per_mm",
+        "beam_pos",
+        "beam_width",
+        "beam_height",
+        "hide_threshold",
+    )
+
+    #: The calibration is read from the hardware, never taken from a client.
+    READ_ONLY_FIELDS = Shape.READ_ONLY_FIELDS + (
+        "pixels_per_mm",
+        "beam_pos",
+        "beam_width",
+        "beam_height",
+    )
+
     def __init__(self, mpos_list, screen_coord):
         super().__init__(mpos_list, screen_coord)
         Grid.SHAPE_COUNT += 1
@@ -1161,6 +1218,7 @@ class Grid(Shape):
         # result is a base64 encoded string for PNG/image heatmap results
         # or a dictionary (for RGB number based results)
         self.result = None
+        self.result_data_path = ""
         self.pixels_per_mm = [1, 1]
         self.beam_pos = [1, 1]
         self.beam_width = 0
@@ -1169,7 +1227,20 @@ class Grid(Shape):
 
         self.set_id(Grid.SHAPE_COUNT)
 
+    def refresh_hw_snapshot(self):
+        """Cache the calibration the grid geometry is reported against.
+
+        as_dict is called for every shape on every shape update, so it must not
+        talk to the hardware itself; the values are refreshed here instead,
+        whenever the shape moves or the zoom changes.
+        """
+        self.pixels_per_mm = HWR.beamline.diffractometer.get_pixels_per_mm()
+        self.beam_pos = HWR.beamline.beam.get_beam_position_on_screen()
+        self.beam_width, self.beam_height = HWR.beamline.beam.get_value()[:2]
+
     def update_position(self, transform):
+        self.refresh_hw_snapshot()
+
         omega_pos = HWR.beamline.diffractometer.omega.get_value() % 360
         _d = abs((self.get_centred_position().omega % 360) - omega_pos)
 
@@ -1177,7 +1248,7 @@ class Grid(Shape):
             self.state = "HIDDEN"
             return
 
-        if min(_d, 360 - _d) > self.shapes_hw_object.hide_grid_threshold:
+        if min(_d, 360 - _d) > HWR.beamline.sample_view.hide_grid_threshold:
             self.state = "HIDDEN"
         else:
             super().update_position(transform)
@@ -1210,23 +1281,26 @@ class Grid(Shape):
         return self.result
 
     def as_dict(self) -> dict:
-        """Convert a shape to a dictionary."""
-        d = Shape.as_dict(self)
-        # replace cpos_list with the motor positions
+        """Convert a shape to a dictionary.
+
+        The grid geometry is expressed in millimetres relative to the beam, off
+        the calibration cached by refresh_hw_snapshot. The key names are part of
+        the ISPyB grid_info contract (see ISPyBValueFactory.dispatch_gridinfo)
+        and are also read by AbstractOnlineProcessing.
+        """
+        d = super().as_dict()
+        # A grid is anchored on a single centred position.
         d["motor_positions"] = self.cp_list[0].as_dict()
 
-        pixels_per_mm = HWR.beamline.diffractometer.get_pixels_per_mm()
-        beam_pos = HWR.beamline.beam.get_beam_position_on_screen()
-        size_x, size_y, shape, _label = HWR.beamline.beam.get_value()
+        pixels_per_mm = self.pixels_per_mm
+        beam_pos = self.beam_pos
 
-        d["x1"] = -float((beam_pos[0] - d["screen_coord"][0]) / pixels_per_mm[0])
-        d["y1"] = -float((beam_pos[1] - d["screen_coord"][1]) / pixels_per_mm[1])
-        d["steps_x"] = d["num_cols"]
-        d["steps_y"] = d["num_rows"]
-        d["dx_mm"] = d["width"] / pixels_per_mm[0]
-        d["dy_mm"] = d["height"] / pixels_per_mm[1]
-        d["beam_width"] = size_x
-        d["beam_height"] = size_y
+        d["x1"] = -float((beam_pos[0] - self.screen_coord[0]) / pixels_per_mm[0])
+        d["y1"] = -float((beam_pos[1] - self.screen_coord[1]) / pixels_per_mm[1])
+        d["steps_x"] = self.num_cols
+        d["steps_y"] = self.num_rows
+        d["dx_mm"] = self.width / pixels_per_mm[0]
+        d["dy_mm"] = self.height / pixels_per_mm[1]
         d["angle"] = 0
 
         return d
