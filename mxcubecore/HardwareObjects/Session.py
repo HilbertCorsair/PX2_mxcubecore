@@ -250,6 +250,8 @@ class Session(HardwareObject):
         """
         base_directory = Path(self.get_base_image_directory()).resolve()
 
+        directory = base_directory
+
         if sub_dir:
             sub_dir = self._sanitize_subdir(sub_dir)
             directory = Path(base_directory, sub_dir)
@@ -273,6 +275,8 @@ class Session(HardwareObject):
         :returns: The full path to processed data.
         """
         base_directory = Path(self.get_base_process_directory()).resolve()
+
+        directory = base_directory
 
         if sub_dir:
             sub_dir = self._sanitize_subdir(sub_dir)

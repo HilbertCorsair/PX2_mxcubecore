@@ -17,6 +17,7 @@
 #  along with MXCuBE. If not, see <http://www.gnu.org/licenses/>.
 
 import logging
+from types import SimpleNamespace
 
 import gevent
 from helical_scan import helical_scan
@@ -84,7 +85,7 @@ class PX2Collect(AbstractCollect, HardwareObject):
     def init(self):
         self.ready_event = gevent.event.Event()
 
-        undulators = self.get_property("undulators", [])
+        undulators = self._normalise_undulators(self.get_property("undulators", []))
         beam_div_hor, beam_div_ver = HWR.beamline.beam.get_beam_divergence()
 
         self.set_beamline_configuration(
@@ -114,6 +115,25 @@ class PX2Collect(AbstractCollect, HardwareObject):
 
         self.emit("collectConnected", (True,))
         self.emit("collectReady", (True,))
+
+    @staticmethod
+    def _normalise_undulators(undulators):
+        """Return undulators as objects with a `type` attribute.
+
+        The yaml gives a list of dicts, but LIMS reporting walks
+        `bl_config.undulators` reading `.type`.
+        """
+        normalised = []
+
+        for undulator in undulators or ():
+            if isinstance(undulator, dict):
+                # {"undulator": {"type": "U24"}} or {"type": "U24"}
+                config = undulator.get("undulator", undulator)
+                normalised.append(SimpleNamespace(**config))
+            else:
+                normalised.append(undulator)
+
+        return normalised
 
     def data_collection_hook(self):
         """Main collection hook"""
@@ -163,104 +183,128 @@ class PX2Collect(AbstractCollect, HardwareObject):
 
         self.store_image_in_lims_by_frame_num(1)
 
-        name_pattern = template[:-8]
+        # The template carries the frame placeholder ("prefix_1_%06d.h5"), the
+        # experiments want the bare name ("prefix_1").
+        name_pattern = template.split("%")[0].rstrip("_")
 
-        if experiment_type == "OSC":
-            scan_range = angle_per_frame * number_of_images
-            scan_exposure_time = exposure_time * number_of_images
-            experiment = omega_scan(
-                name_pattern,
-                directory,
-                scan_range=scan_range,
-                scan_exposure_time=scan_exposure_time,
-                scan_start_angle=scan_start_angle,
-                angle_per_frame=angle_per_frame,
-                image_nr_start=image_nr_start,
-                photon_energy=energy,
-                transmission=transmission,
-                resolution=resolution,
-                simulation=False,
-            )
-            experiment.execute()
+        # Centred position, in MD2 motor names. The experiments fall back to
+        # the current goniometer position when this is None.
+        position = self.translate_position(parameters.get("motors") or {}) or None
 
-        elif experiment_type == "Characterization":
-            number_of_wedges = osc_seq["number_of_images"]
-            wedge_size = osc_seq["wedge_size"]
-            overlap = osc_seq["overlap"]
-            scan_start_angles = []
-            scan_exposure_time = exposure_time * wedge_size
-            scan_range = angle_per_frame * wedge_size
-
-            for k in range(number_of_wedges):
-                scan_start_angles.append(
-                    scan_start_angle + k * -overlap + k * scan_range
+        try:
+            if experiment_type == "OSC":
+                scan_range = angle_per_frame * number_of_images
+                scan_exposure_time = exposure_time * number_of_images
+                experiment = omega_scan(
+                    name_pattern,
+                    directory,
+                    scan_range=scan_range,
+                    scan_exposure_time=scan_exposure_time,
+                    scan_start_angle=scan_start_angle,
+                    angle_per_frame=angle_per_frame,
+                    image_nr_start=image_nr_start,
+                    position=position,
+                    photon_energy=energy,
+                    transmission=transmission,
+                    resolution=resolution,
+                    simulation=False,
                 )
 
-            experiment = reference_images(
-                name_pattern,
-                directory,
-                scan_range=scan_range,
-                scan_exposure_time=scan_exposure_time,
-                scan_start_angles=scan_start_angles,
-                angle_per_frame=angle_per_frame,
-                image_nr_start=image_nr_start,
-                photon_energy=energy,
-                transmission=transmission,
-                resolution=resolution,
-                simulation=False,
-            )
+            elif experiment_type == "Characterization":
+                number_of_wedges = osc_seq["number_of_images"]
+                # osc_seq carries no wedge_size: one frame per wedge unless
+                # configured otherwise.
+                wedge_size = osc_seq.get("wedge_size") or self.get_property(
+                    "reference_wedge_size", 1
+                )
+                overlap = osc_seq["overlap"]
+                scan_start_angles = []
+                scan_exposure_time = exposure_time * wedge_size
+                scan_range = angle_per_frame * wedge_size
+
+                for k in range(number_of_wedges):
+                    scan_start_angles.append(
+                        scan_start_angle + k * -overlap + k * scan_range
+                    )
+
+                experiment = reference_images(
+                    name_pattern,
+                    directory,
+                    scan_range=scan_range,
+                    scan_exposure_time=scan_exposure_time,
+                    scan_start_angles=scan_start_angles,
+                    angle_per_frame=angle_per_frame,
+                    image_nr_start=image_nr_start,
+                    position=position,
+                    photon_energy=energy,
+                    transmission=transmission,
+                    resolution=resolution,
+                    simulation=False,
+                )
+
+            elif experiment_type == "Helical" and osc_seq["mesh_range"] == ():
+                scan_range = angle_per_frame * number_of_images
+                scan_exposure_time = exposure_time * number_of_images
+                log.info("helical_pos %s" % self.helical_pos)
+                experiment = helical_scan(
+                    name_pattern,
+                    directory,
+                    scan_range=scan_range,
+                    scan_exposure_time=scan_exposure_time,
+                    scan_start_angle=scan_start_angle,
+                    angle_per_frame=angle_per_frame,
+                    image_nr_start=image_nr_start,
+                    position_start=self.translate_position(self.helical_pos["1"]),
+                    position_end=self.translate_position(self.helical_pos["2"]),
+                    photon_energy=energy,
+                    transmission=transmission,
+                    resolution=resolution,
+                    simulation=False,
+                )
+
+            elif experiment_type == "Helical" and osc_seq["mesh_range"] != ():
+                # X-ray centring is not ported to PX2 yet: the xray_centring
+                # import is commented out at the top of this file.
+                raise RuntimeError(
+                    "X-ray centring (helical over a grid) is not supported at PX2"
+                )
+
+            elif experiment_type == "Mesh":
+                number_of_columns = osc_seq["number_of_lines"]
+                number_of_rows = int(number_of_images / number_of_columns)
+                horizontal_range, vertical_range = osc_seq["mesh_range"]
+                angle_per_line = angle_per_frame * number_of_columns
+                experiment = raster_scan(
+                    name_pattern,
+                    directory,
+                    vertical_range,
+                    horizontal_range,
+                    number_of_rows,
+                    number_of_columns,
+                    frame_time=exposure_time,
+                    scan_start_angle=scan_start_angle,
+                    scan_range=angle_per_line,
+                    image_nr_start=image_nr_start,
+                    position=position,
+                    photon_energy=energy,
+                    transmission=transmission,
+                    simulation=False,
+                )
+
+            else:
+                raise RuntimeError(
+                    "Unsupported experiment type '%s'" % experiment_type
+                )
 
             experiment.execute()
-
-        elif experiment_type == "Helical" and osc_seq["mesh_range"] == ():
-            scan_range = angle_per_frame * number_of_images
-            scan_exposure_time = exposure_time * number_of_images
-            log.info("helical_pos %s" % self.helical_pos)
-            experiment = helical_scan(
-                name_pattern,
-                directory,
-                scan_range=scan_range,
-                scan_exposure_time=scan_exposure_time,
-                scan_start_angle=scan_start_angle,
-                angle_per_frame=angle_per_frame,
-                image_nr_start=image_nr_start,
-                position_start=self.translate_position(self.helical_pos["1"]),
-                position_end=self.translate_position(self.helical_pos["2"]),
-                photon_energy=energy,
-                transmission=transmission,
-                resolution=resolution,
-                simulation=False,
-            )
-            experiment.execute()
-
-        elif experiment_type == "Helical" and osc_seq["mesh_range"] != ():
-            horizontal_range, vertical_range = osc_seq["mesh_range"]
-
-            experiment = xray_centring(name_pattern, directory)
-
-            experiment.execute(simulation=False)
-
-        elif experiment_type == "Mesh":
-            number_of_columns = osc_seq["number_of_lines"]
-            number_of_rows = int(number_of_images / number_of_columns)
-            horizontal_range, vertical_range = osc_seq["mesh_range"]
-            angle_per_line = angle_per_frame * number_of_columns
-            experiment = raster_scan(
-                name_pattern,
-                directory,
-                vertical_range,
-                horizontal_range,
-                number_of_rows,
-                number_of_columns,
-                frame_time=exposure_time,
-                scan_start_angle=scan_start_angle,
-                scan_range=angle_per_line,
-                image_nr_start=image_nr_start,
-                photon_energy=energy,
-                transmission=transmission,
-                simulation=False,
-            )
-            experiment.execute()
+        except RuntimeError:
+            raise
+        except Exception as ex:
+            # do_collect() only handles RuntimeError; anything else escaping
+            # from here never sets ready_event and hangs the queue.
+            raise RuntimeError(
+                "%s failed: %s: %s" % (experiment_type, type(ex).__name__, ex)
+            ) from ex
 
         # for image in range(number_of_images):
         # if self.aborted_by_user:
@@ -278,25 +322,31 @@ class PX2Collect(AbstractCollect, HardwareObject):
         # self.emit("collectImageTaken", image)
         # self.emit("progressStep", (int(float(image) / number_of_images * 100)))
 
-        self.emit_collection_finished()
+        # NB do not finish the collection here: do_collect() updates LIMS and
+        # calls collection_finished() (which sets ready_event) once the hook
+        # returns.
 
     def translate_position(self, position):
-        translation = {
-            "sampx": "CentringX",
-            "sampy": "CentringY",
-            "phix": "AlignmentX",
-            "phiy": "AlignmentY",
-            "phiz": "AlignmentZ",
-        }
+        """Translate mxcube motor roles to the MD2 names the experiments use."""
+        # Single source of truth for the mapping (phiy IS AlignmentY, and PX2
+        # has focus, not phix).
+        translation = getattr(
+            HWR.beamline.diffractometer, "MOTOR_ROLE_TO_MD2", {}
+        )
         translated_position = {}
-        for key in position:
-            if key in translation:
-                translated_position[translation[key]] = position[key]
-            else:
-                translated_position[key] = position[key]
+
+        for key, value in (position or {}).items():
+            if value is None:
+                continue
+            # The scan angles are given separately; a position holding Omega
+            # would fight the scan start angle.
+            if key in ("omega", "Omega"):
+                continue
+            translated_position[translation.get(key, key)] = value
+
         return translated_position
 
-    def trigger_auto_processing(self, process_event, params_dict, frame_number):
+    def trigger_auto_processing(self, process_event, frame_number):
         """
         Descript. :
         """
@@ -307,6 +357,20 @@ class PX2Collect(AbstractCollect, HardwareObject):
                 frame_number,
                 self.run_offline_processing,
             )
+
+    def update_data_collection_in_lims(self):
+        """Collect LIMS metadata only when there is a LIMS to store it in.
+
+        The base implementation only checks that the object exists, and then
+        gathers values that raise without a connection. Any such error escapes
+        do_collect() (it only handles RuntimeError) and hangs the queue.
+        """
+        lims = HWR.beamline.lims
+
+        if not lims or not lims.is_connected():
+            return
+
+        super(PX2Collect, self).update_data_collection_in_lims()
 
     @task
     def _take_crystal_snapshot(self, filename):
@@ -321,66 +385,46 @@ class PX2Collect(AbstractCollect, HardwareObject):
 
     @task
     def move_motors(self, motor_position_dict):
-        """
-        Descript. :
-        """
-        return
+        """Move the goniometer to the centred position of the collection."""
+        positions = {
+            role: value
+            for role, value in (motor_position_dict or {}).items()
+            if value is not None
+        }
 
-    def emit_collection_finished(self):
-        """Collection finished behaviour"""
-        if self.current_dc_parameters["experiment_type"] != "Collect - Multiwedge":
-            self.update_data_collection_in_lims()
+        if not positions:
+            return
 
-            last_frame = self.current_dc_parameters["oscillation_sequence"][0][
-                "number_of_images"
-            ]
-            if last_frame > 1:
-                self.store_image_in_lims_by_frame_num(last_frame)
-            if (
-                self.current_dc_parameters["experiment_type"] in ("OSC", "Helical")
-                and self.current_dc_parameters["oscillation_sequence"][0]["overlap"]
-                == 0
-                and last_frame > 19
-            ):
-                self.trigger_auto_processing("after", self.current_dc_parameters, 0)
-
-        success_msg = "Data collection successful"
-        self.current_dc_parameters["status"] = success_msg
-        self.emit(
-            "collectOscillationFinished",
-            (
-                self.owner,
-                True,
-                success_msg,
-                self.current_dc_parameters.get("collection_id"),
-                self.osc_id,
-                self.current_dc_parameters,
-            ),
+        logging.getLogger("user_level_log").info(
+            "Collection: moving to centred position %s", positions
         )
-        self.emit("collectEnded", self.owner, success_msg)
-        self.emit("collectReady", (True,))
-        self.emit("progressStop", ())
-        self.emit("fsmConditionChanged", "data_collection_successful", True)
-        self.emit("fsmConditionChanged", "data_collection_started", False)
-        self._collecting = None
-        self.ready_event.set()
+        HWR.beamline.diffractometer.set_value_motors(
+            positions, timeout=self.get_property("move_timeout", 30)
+        )
 
-    def store_image_in_lims_by_frame_num(self, frame, motor_position_id=None):
+    def store_image_in_lims_by_frame_num(self, frame_number):
         """
         Descript. :
         """
-        image_id = None
-        self.trigger_auto_processing("image", self.current_dc_parameters, frame)
-        image_id = self.store_image_in_lims(frame)
-        return image_id
+        self.trigger_auto_processing("image", frame_number)
 
-    def stopCollect(self, owner="MXCuBE"):
-        """
-        Descript. :
-        """
+        lims = HWR.beamline.lims
+
+        if not lims or not lims.is_connected():
+            return None
+
+        return self.store_image_in_lims(frame_number)
+
+    def stop_collect(self):
+        """Abort the collection, on the hardware as well as in the queue."""
         self.aborted_by_user = True
-        self.cmd_collect_abort()
-        self.emit_collection_failed("Aborted by user")
+
+        try:
+            HWR.beamline.diffractometer.abort()
+        except Exception:
+            self.log.exception("Collection: could not abort the goniometer")
+
+        super(PX2Collect, self).stop_collect()
 
     def set_helical_pos(self, helical_pos):
         self.helical_pos = helical_pos
