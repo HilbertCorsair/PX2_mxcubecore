@@ -10,6 +10,7 @@ import logging
 
 import gevent
 
+from mxcubecore import HardwareRepository as HWR
 from mxcubecore.BaseHardwareObjects import HardwareObjectState
 from mxcubecore.HardwareObjects.mockup.MicrodiffZoomMockup import MicrodiffZoomMockup
 
@@ -44,13 +45,28 @@ class PX2Zoom(MicrodiffZoomMockup):
     def _set_value(self, value):
         gevent.spawn(self._set_zoom, value)
 
+    def zoom_level_changed(self, level):
+        """MD2 CoaxialCameraZoomValue update, including changes made outside MXCuBE."""
+        try:
+            value = self.value_to_enum(int(level))
+        except (TypeError, ValueError):
+            return
+        self.update_value(value)
+
     def _set_zoom(self, value, adjust_zoom=True):
         level = value.value
         self.update_state(HardwareObjectState.BUSY)
         try:
             self.camera.set_zoom(level, adjust_zoom=adjust_zoom)
+            # The zoom write returns at once; wait for the MD2 to settle so the
+            # CoaxCamScale read on valueChanged belongs to the new level.
+            try:
+                HWR.beamline.diffractometer.wait_status_ready(10)
+            except Exception:
+                logging.getLogger("HWR").warning(
+                    "PX2Zoom: MD2 not Ready 10 s after zoom change"
+                )
         finally:
-            self._nominal_value = value
             self.update_value(value)
             focus_offset = self.camera.focus_offsets.get(level)
             self.emit("predefinedPositionChanged", (level, focus_offset))

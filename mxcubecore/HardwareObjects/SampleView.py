@@ -403,7 +403,12 @@ class SampleView(AbstractSampleView):
         """Execute if centring accepted."""
         self.centring_status = {"motors": {}, "method": self.current_centring_method}
         self.centring_status["motors"] = self.get_positions()
-        HWR.beamline.diffractometer.save_centring_positions()
+        # A failing MD2 command must not keep centringSuccessful from going out,
+        # or the UI is left waiting in centring mode
+        try:
+            HWR.beamline.diffractometer.save_centring_positions()
+        except Exception:
+            logging.getLogger("HWR").exception("Could not save centring positions")
 
         self.centring_status["valid"] = True
 

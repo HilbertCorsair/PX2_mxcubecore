@@ -249,6 +249,10 @@ class PX2Diffractometer(AbstractDiffractometer):
         self.beam_position = (680, 512)
         self.fast_shutter_is_open = False
         self.collecting = False
+        self._md2_phase = None
+        self.transfer_omega = 300.0
+        self.transfer_omega_tolerance = 1.0
+        self.aperture_index_channel = None
 
         self.chan_calib_x = None
         self.chan_calib_y = None
@@ -354,7 +358,16 @@ class PX2Diffractometer(AbstractDiffractometer):
 
         self.chan_calib_x = self.get_channel_object("CoaxCamScaleX")
         self.chan_calib_y = self.get_channel_object("CoaxCamScaleY")
+        # The MD2 pushes CoaxCamScaleX/Y once the zoom has settled; reading
+        # them on our own zoom valueChanged alone catches the previous level.
+        for chan in (self.chan_calib_x, self.chan_calib_y):
+            if chan:
+                chan.connect_signal("update", self.update_pixels_per_mm)
         self.update_pixels_per_mm()
+
+        self.aperture_index_channel = self.get_channel_object(
+            "CurrentApertureDiameterIndex"
+        )
 
         self.chan_head_type = self.get_channel_object("HeadType")
         if self.chan_head_type:
@@ -362,6 +375,13 @@ class PX2Diffractometer(AbstractDiffractometer):
                 self.head_type = DiffractometerHead(self.chan_head_type.get_value())
             except ValueError:
                 self.head_type = DiffractometerHead.UNKNOWN
+
+        self.transfer_omega = float(self.get_property("transfer_omega", 300.0))
+        self.transfer_omega_tolerance = float(
+            self.get_property("transfer_omega_tolerance", 1.0)
+        )
+        if self.omega is not None:
+            self.connect(self.omega, "valueChanged", self._omega_moved)
 
         self.chan_current_phase = self.get_channel_object("CurrentPhase")
         if self.chan_current_phase:
@@ -401,6 +421,9 @@ class PX2Diffractometer(AbstractDiffractometer):
             self.connect(
                 self.zoom, "valueChanged", self.zoom_position_changed
             )
+            chan_zoom = self.get_channel_object("CoaxialCameraZoomValue")
+            if chan_zoom and hasattr(self.zoom, "zoom_level_changed"):
+                chan_zoom.connect_signal("update", self.zoom.zoom_level_changed)
             self.connect(
                 self.zoom,
                 "predefinedPositionChanged",
@@ -467,16 +490,45 @@ class PX2Diffractometer(AbstractDiffractometer):
             self.emit("minidiffStatusChanged", (self.current_status,))
 
     def current_phase_changed(self, raw_phase):
-        phase_enum = self.PHASE_FROM_MD2.get(raw_phase, DiffractometerPhase.UNKNOWN)
+        self._md2_phase = raw_phase
+        self._refresh_phase()
+
+    def _omega_moved(self, _value):
+        self._refresh_phase()
+
+    def _effective_phase(self):
+        """Phase as shown to the user.
+
+        The MD2 keeps reporting Transfer after omega has been moved away from
+        the transfer angle; at that point the goniometer is in practice back
+        in centring, so report CENTRE instead.
+        """
+        phase = self.PHASE_FROM_MD2.get(self._md2_phase, DiffractometerPhase.UNKNOWN)
+        if phase != DiffractometerPhase.TRANSFER or self.omega is None:
+            return phase
+        try:
+            omega = self.omega.get_value()
+        except Exception:
+            return phase
+        if omega is None:
+            return phase
+        delta = abs((omega - self.transfer_omega + 180.0) % 360.0 - 180.0)
+        if delta > self.transfer_omega_tolerance:
+            return DiffractometerPhase.CENTRE
+        return phase
+
+    def _refresh_phase(self):
+        phase_enum = self._effective_phase()
         if self.current_phase == phase_enum:
             return
-        self.current_phase = phase_enum
         if phase_enum != DiffractometerPhase.UNKNOWN:
             logging.getLogger("GUI").info(
-                "Diffractometer: Current phase changed to %s", raw_phase
+                "Diffractometer: Current phase changed to %s", phase_enum.value
             )
+        # update_phase() assigns current_phase and emits phaseChanged; setting
+        # current_phase here first would make it see no change and stay silent.
         self.update_phase(phase_enum)
-        self.emit("minidiffPhaseChanged", (raw_phase,))
+        self.emit("minidiffPhaseChanged", (phase_enum.value,))
 
     def set_phase(self, phase, timeout=60):
         """Set the MD2 phase.
@@ -516,17 +568,24 @@ class PX2Diffractometer(AbstractDiffractometer):
                 self.detector.insert_protective_cover()
 
         self.update_state(HardwareObjectState.BUSY)
-        if timeout is not None:
-            self.cmd_start_set_phase(md2_name)
-            gevent.sleep(1)
-            with gevent.Timeout(
-                timeout, Exception(f"Timeout waiting for phase {md2_name}")
-            ):
-                while md2_name != self.chan_current_phase.get_value():
-                    gevent.sleep(0.01)
-        else:
-            self.cmd_start_set_phase(md2_name)
-        self.update_state(HardwareObjectState.READY)
+        try:
+            if timeout is not None:
+                self.cmd_start_set_phase(md2_name)
+                gevent.sleep(1)
+                with gevent.Timeout(
+                    timeout, Exception(f"Timeout waiting for phase {md2_name}")
+                ):
+                    while md2_name != self.chan_current_phase.get_value():
+                        gevent.sleep(0.01)
+            else:
+                self.cmd_start_set_phase(md2_name)
+        except Exception:
+            # The UI selected the phase optimistically; push the real one back
+            if self.current_phase is not None:
+                self.emit("phaseChanged", (self.current_phase.name,))
+            raise
+        finally:
+            self.update_state(HardwareObjectState.READY)
 
     # ------------------------------------------------------------------
     # Helpers expected by SampleView and downstream callers
@@ -555,11 +614,21 @@ class PX2Diffractometer(AbstractDiffractometer):
                 calib_y,
             )
             return
-        self.pixels_per_mm_x = 1.0 / calib_x
-        self.pixels_per_mm_y = 1.0 / calib_y
-        self.emit(
-            "pixelsPerMmChanged", ((self.pixels_per_mm_x, self.pixels_per_mm_y),)
-        )
+        ppm = (1.0 / calib_x, 1.0 / calib_y)
+        if ppm == (self.pixels_per_mm_x, self.pixels_per_mm_y):
+            return
+        self.pixels_per_mm_x, self.pixels_per_mm_y = ppm
+        self.refresh_omega_reference_position()
+        self.emit("pixelsPerMmChanged", (ppm,))
+
+    def get_aperture_index(self):
+        """Return the MD2 current aperture diameter index, or None."""
+        if self.aperture_index_channel is None:
+            return None
+        try:
+            return int(self.aperture_index_channel.get_value())
+        except Exception:
+            return None
 
     def wait_status_ready(self, timeout=None):
         """Block until the MD2 application reports the global state Ready."""
@@ -619,6 +688,7 @@ class PX2Diffractometer(AbstractDiffractometer):
         if self.current_phase is not None:
             phase_name = self.PHASE_TO_MD2.get(self.current_phase, "Unknown")
             self.emit("minidiffPhaseChanged", (phase_name,))
+            self.emit("phaseChanged", (self.current_phase.name,))
         self.emit("omegaReferenceChanged", (self.reference_pos,))
         self.emit("minidiffShutterStateChanged", (self.fast_shutter_is_open,))
 
